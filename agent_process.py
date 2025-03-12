@@ -16,13 +16,22 @@ class AgentProcess(Process):
     def __init__(
         self, agent_name, system_prompt, model_name="llama3.1:latest", pipe=None
     ):
+        """Initialize the agent process.
+
+        Args:
+            agent_name (str): Name of the agent
+            system_prompt (str): System prompt for the agent
+            pipe (Connection): Communication pipe to the main process
+            model_name (str): Name of the model to use for inference
+        """
         super().__init__()
         self.agent_name = agent_name
         self.system_prompt = system_prompt
         self.model_name = model_name
         self.pipe = pipe
-        self.local_memory = []  # Agent's private memory
         self.daemon = True  # Process will exit when main process exits
+        self.local_memory = []  # Store some local memory for context
+        self.last_message = {}  # Store the last message for context
 
     def run(self):
         """Main process loop that waits for and handles incoming requests."""
@@ -34,9 +43,13 @@ class AgentProcess(Process):
                     message = self.pipe.recv()
 
                     if message["type"] == "request":
+                        # Store the message for context
+                        self.last_message = message
+
                         # Process the request
                         query = message["query"]
                         context = message.get("context", [])
+                        conversation_history = message.get("conversation_history", "")
 
                         # Log the request
                         print(
@@ -44,7 +57,7 @@ class AgentProcess(Process):
                         )
 
                         # Process query and get response
-                        response = self.process_query(query, context)
+                        response = self.process_query(query, context, conversation_history)
 
                         # Update local memory
                         self.update_local_memory(query, response)
@@ -76,16 +89,23 @@ class AgentProcess(Process):
                     {"type": "error", "agent": self.agent_name, "error": str(e)}
                 )
 
-    def process_query(self, query, context):
+    def process_query(self, query, context, conversation_history=""):
         """Process a query using the agent's model and system prompt."""
         # Combine context with query
         if context:
-            context_str = "Based on our previous conversations, I know the following facts that may be relevant:\n"
-            for fact in context:
-                context_str += f"- {fact}\n"
-            full_prompt = f"{context_str}\n\nUser request: {query}"
+            context_str = "IMPORTANT MEMORY CONTEXT:\n"
+            context_str += "The following facts are from our memory system and represent information from previous conversations. These are the ONLY facts you should reference outside of what's in the current conversation:\n\n"
+            for i, fact in enumerate(context, 1):
+                context_str += f"FACT {i}: {fact}\n"
+            context_str += "\nYou MUST ONLY reference these facts and information provided in the current conversation. Do not hallucinate or make up additional information."
         else:
-            full_prompt = query
+            context_str = "MEMORY CONTEXT: No relevant facts found in memory. You MUST ONLY reference information provided in the current conversation. Do not hallucinate or make up additional information."
+
+        # Add conversation history if available
+        if conversation_history:
+            full_prompt = f"{context_str}\n\n{conversation_history}\n===\n\nCURRENT USER REQUEST: {query}"
+        else:
+            full_prompt = f"{context_str}\n\n===\n\nCURRENT USER REQUEST: {query}"
 
         # Create the LLM payload
         payload = {
@@ -98,7 +118,9 @@ class AgentProcess(Process):
         # Add system prompt if available
         enhanced_system = self.system_prompt
         if context:
-            enhanced_system += "\n\nUse the provided context when it's relevant to the user's request. Don't explicitly mention that you're using previous conversation data unless directly asked about your memory."
+            enhanced_system += "\n\nIMPORTANT: Only use information from the MEMORY CONTEXT provided. When referencing facts from memory, be transparent by noting 'According to our records...' or 'Based on our previous conversations...'. Do not hallucinate additional information. If you don't have enough information to answer completely, acknowledge this and ask for more details."
+        else:
+            enhanced_system += "\n\nIMPORTANT: You have no relevant facts from memory for this query. Only use information the user provides in the current conversation. Do not hallucinate or make up information. Be completely transparent about what you don't know."
 
         payload["system"] = enhanced_system
 

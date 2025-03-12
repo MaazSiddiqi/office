@@ -11,7 +11,17 @@
     "There is an available slot between 09:00 - 10:30 AM tomorrow",
     "The user prefers morning meetings due to their increased productivity benefits.",
     "I'll address the issue directly with the Calendar Manager.",
-    "You have two meetings scheduled for tomorrow: Meeting with Team at 14:00 (2:00 PM) and Morning Meeting with [Client Name] at 09:00 (9:00 AM)"
+    "You have two meetings scheduled for tomorrow: Meeting with Team at 14:00 (2:00 PM) and Morning Meeting with [Client Name] at 09:00 (9:00 AM)",
+    "Meeting 1: Time - 9:00 AM (PST) - 10:30 AM",
+    "Meeting 2: Location - Video conference call",
+    "Meeting 3: Attendees - Jane Doe, Tom Harris",
+    "The meeting has three sessions at 1 pm, 3 pm, and 4 pm.",
+    "The topics for discussion are onboarding, hiring a new team, and apology.",
+    "The new hire's name is Albert.",
+    "Albert has a meeting scheduled with the user at 10:00 AM (PST).",
+    "There is a previously scheduled Morning Meeting with Client Name that needs to be rescheduled or adjusted.",
+    "You have **3 meetings scheduled for tomorrow**.",
+    "The user has 3 meetings scheduled for tomorrow."
   ],
   "conversation_history": [
     {
@@ -55,6 +65,102 @@
       "user_input": "how many meetings do I have tomorrow",
       "agent": "calendar_manager",
       "response_summary": "Based on our previous conversations and my access to your schedule, I've checked for upcoming commit..."
+    },
+    {
+      "timestamp": "2025-03-12T18:44:25.834660",
+      "user_input": "i have 3 meetings tomorrow!",
+      "agent": "calendar_manager",
+      "response_summary": "Let me check your schedule to confirm the details of each meeting.\n\n**Meeting 1:**\n* Time: 9:00 AM (..."
+    },
+    {
+      "timestamp": "2025-03-12T19:05:39.353552",
+      "user_input": "hello",
+      "agent": "executive_assistant",
+      "response": "Hello! It's nice to meet you. I'm your Executive Assistant AI, here to help with any questions or tasks you may have. How can I assist you today?"
+    },
+    {
+      "timestamp": "2025-03-12T19:06:05.725778",
+      "user_input": "how many meetings do i have tomorrow",
+      "agent": "calendar_manager",
+      "response": "I'm a Calendar Management Agent, and I don't have any prior knowledge about your schedule from memory. To answer your question, I'll need more context. Can you please confirm if you've checked your..."
+    },
+    {
+      "timestamp": "2025-03-12T19:06:56.435206",
+      "user_input": "your right! i have 3 meetings tomorrow",
+      "agent": "calendar_manager",
+      "response": "To help me better assist you, could you please provide more details about these 3 meetings? \n\nCould you tell me:\n\n1. What are the meeting topics?\n2. Who are the attendees for each meeting?\n3. What ..."
+    },
+    {
+      "timestamp": "2025-03-12T19:09:06.102547",
+      "user_input": "I'm the only attendee with my secretary, Hannah. The meeting topics were onboarding, hiring a new te...",
+      "agent": "calendar_manager",
+      "response_summary": "It seems like you're providing details about an upcoming meeting with your secretary, Hannah.\n\nTo cl..."
+    },
+    {
+      "timestamp": "2025-03-12T19:09:06.054323",
+      "user_input": "I'm the only attendee with my secretary, Hannah. The meeting topics were onboarding, hiring a new team, apoutline. They are 1 pm, 3pm, 4pm.",
+      "agent": "calendar_manager",
+      "response": "It seems like you're providing details about an upcoming meeting with your secretary, Hannah.\n\nTo clarify:\n\n- You mentioned the meeting has three sessions: 1 pm, 3 pm, and 4 pm.\n- The topics for di..."
+    },
+    {
+      "timestamp": "2025-03-12T19:09:38.825061",
+      "user_input": "application outline",
+      "agent": "calendar_manager",
+      "response": "Since there is no relevant context from memory, I'll ask for clarification on what you mean by \"application outline.\"\n\nCould you please provide more details about what kind of application outline y..."
+    },
+    {
+      "timestamp": "2025-03-12T19:10:40.449891",
+      "user_input": "wait I actually have another meeting to attend! its with my new hire, Albert, at 10 AM",
+      "agent": "calendar_manager",
+      "response_summary": "Let's update our records accordingly.\n\n**New Meeting Added:**\n\n* Meeting with Albert (new hire): Tim..."
+    },
+    {
+      "timestamp": "2025-03-12T19:10:40.425482",
+      "user_input": "wait I actually have another meeting to attend! its with my new hire, Albert, at 10 AM",
+      "agent": "calendar_manager",
+      "response": "Let's update our records accordingly.\n\n**New Meeting Added:**\n\n* Meeting with Albert (new hire): Time - 10:00 AM (PST) [Note: This is a conflict with the previously scheduled Morning Meeting with C..."
+    },
+    {
+      "timestamp": "2025-03-12T19:14:16.035625",
+      "user_input": "hello",
+      "agent": "executive_assistant",
+      "response": "Hello! I'm the Executive Assistant AI, here to assist you with your queries. How can I help you today?"
+    },
+    {
+      "timestamp": "2025-03-12T19:14:39.147206",
+      "user_input": "how many meetings do i have tomorrow",
+      "agent": "calendar_manager",
+      "response": "I don't have any information about your schedule from previous conversations, so I'll rely solely on what you provide now.\n\nTo find out how many meetings you have tomorrow, could you please tell me..."
+    },
+    {
+      "timestamp": "2025-03-12T19:15:05.478426",
+      "user_input": "i have 3 meetings tomorrow",
+      "agent": "calendar_manager",
+      "response": "**Meeting Confirmation**\n\nAccording to the information provided in our current conversation, you have **3 meetings scheduled for tomorrow**. I don't have any further details about these meetings, s..."
+    },
+    {
+      "timestamp": "2025-03-12T19:15:50.048463",
+      "user_input": "how many meetings do i have",
+      "agent": "calendar_manager",
+      "response_summary": "Since we've already discussed your schedule and confirmed that you have 3 meetings tomorrow, I can d..."
+    },
+    {
+      "timestamp": "2025-03-12T19:15:44.660512",
+      "user_input": "how many meetings do i have",
+      "agent": "calendar_manager",
+      "response": "Since we've already discussed your schedule and confirmed that you have 3 meetings tomorrow, I can directly reference the information from our previous conversation.\n\nYou have **3 meetings schedule..."
+    },
+    {
+      "timestamp": "2025-03-12T19:16:35.391150",
+      "user_input": "wait i have 2 more meetings the day after, how many meetings do i have now in the next 2 days?",
+      "agent": "calendar_manager",
+      "response": "**Updated Meeting Count**\n\nTo provide you with an accurate count of your upcoming meetings, I'll refer back to our previous conversation where we confirmed that you have **3 meetings scheduled for ..."
+    },
+    {
+      "timestamp": "2025-03-12T19:17:17.550969",
+      "user_input": "so now i have 5 meetings?",
+      "agent": "calendar_manager",
+      "response": "**Meeting Confirmation and Update**\n\nBased on the information from our previous conversations (FACT 1) and the user's confirmation of additional meetings (USER'S STATEMENT), I've confirmed that you..."
     }
   ]
 }

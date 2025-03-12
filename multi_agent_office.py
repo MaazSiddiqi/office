@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
 
+"""
+AI Office - Multi-Agent Office
+=============================
+
+This module defines the MultiAgentOffice class, which is the central orchestration
+component of the AI Office system. It manages multiple agent processes, routes queries
+to the appropriate agents, and maintains the shared memory system.
+
+The multi-agent architecture allows different specialized agents to work in parallel,
+each with their own expertise, while sharing information through a common memory system.
+"""
+
 import os
 import json
 import requests
@@ -14,25 +26,128 @@ import uuid
 from collections import defaultdict
 import multiprocessing
 
-# Configuration
-MODEL_NAME = "llama3.1:latest"
-API_URL = "http://localhost:11434/api/generate"
+# Configuration constants
+DEFAULT_MODEL = "llama3.1:latest"
+DEFAULT_API_URL = "http://localhost:11434/api/generate"
 REGISTRY_FILE = "agent_registry.json"
 MEMORY_FILE = "office_memory.json"
 
+# Message types
+MSG_TYPE_REQUEST = "request"
+MSG_TYPE_SHUTDOWN = "shutdown"
+MSG_TYPE_RESPONSE = "response"
+
+# Memory operation types
+MEMORY_OP_EXTRACT = "extract"
+MEMORY_OP_READ = "read"
+MEMORY_OP_QUERY = "query"
+
+# Command constants
+CMD_WHO = "/who"
+CMD_SWITCH = "/switch_to"
+CMD_EA = "/ea"
+CMD_HELP = "/help"
+CMD_CLEAR = "/clear"
+
+# Thresholds and limits
+MAX_FACTS_PER_QUERY = 5
+TRAINER_CHECK_INTERVAL = 5.0
+MEMORY_WAIT_TIMEOUT = 5.0
+MIN_DELEGATION_CONFIDENCE = 0.6
+MAX_CONTEXT_LENGTH = 5
+EA_AGENT_NAME = "executive_assistant"
+
 
 class MultiAgentOffice:
+    """
+    The main orchestration class for the multi-agent office system.
+
+    This class manages all agent processes, routes queries to the appropriate agents,
+    and maintains the shared memory system. It acts as the central hub for all
+    communication between agents and with the user.
+
+    Attributes:
+        registry (dict): Dictionary of registered agents and their details
+        agent_processes (dict): Dictionary of running agent processes
+        agent_pipes (dict): Dictionary of communication pipes to agent processes
+        memory_manager (MemoryManagerProcess): The memory manager process
+        agent_trainer (AgentTrainerProcess): The agent training/improvement process
+        current_agent (str): The agent currently in conversation with the user
+        conversation_history (list): History of recent conversations
+    """
+
     def __init__(self, registry_file=REGISTRY_FILE, memory_file=MEMORY_FILE):
+        """
+        Initialize the multi-agent office system.
+
+        Args:
+            registry_file (str): Path to the agent registry JSON file
+            memory_file (str): Path to the memory storage JSON file
+        """
         self.registry = {}  # Store agent details
         self.agent_processes = {}  # Store agent processes
         self.agent_pipes = {}  # Store communication pipes
         self.registry_file = registry_file
         self.memory_file = memory_file
 
+        # Define the EA system prompt
+        self.ea_system_prompt = """You are the Executive Assistant AI in our AI Office system. Your role is to:
+1. Answer user questions directly when you can, using ONLY information from our memory system or provided in the current conversation
+2. Delegate specific tasks to specialized agents when necessary
+3. Maintain context and continuity throughout the conversation
+4. Remember important information through our memory system
+
+IMPORTANT - CONVERSATION FLOW:
+- When a user's message follows directly after a specialized agent's response, assume it's likely a reply to that agent
+- If a user's message seems to be responding to questions or information from a specialized agent, route it back to that agent
+- Don't interrupt ongoing conversations between a user and a specialized agent unless:
+  a) The user explicitly addresses you
+  b) The user introduces a completely new topic
+  c) The agent has completed its task (indicated by phrases like "Is there anything else I can help with?")
+
+IMPORTANT - KNOWLEDGE LIMITATIONS:
+- You have NO general knowledge about the world. You MUST ONLY reference:
+- Facts stored in our memory system from past conversations
+- Information explicitly stated by the user in the current conversation
+- Your core functions and abilities
+
+Never hallucinate information. If you don't have relevant information in memory or from the user, clearly state this and either:
+1. Ask the user for the information you need
+2. Delegate to a specialized agent with appropriate skills
+3. Explain that you don't have this information in memory
+
+Be helpful, professional, and efficient. When you don't know something, be honest and consider if another agent might be able to help."""
+
+        # Initialize training status
+        self.training_status = defaultdict(lambda: {
+            "status": "idle",
+            "last_updated": time.time(),
+            "dissatisfaction_count": 0,
+            "total_interactions": 0
+        })
+
+        # Flag to track user dissatisfaction
+        self.previous_query_showed_dissatisfaction = False
+
+        # Current agent tracking
+        self.current_agent = None
+        self.conversation_history = []
+
+        # Initialize memory cache
+        self.memory = {"facts": [], "conversation_history": []}
+
         # Start memory manager process
         self.memory_manager = MemoryManagerProcess(memory_file=memory_file)
         self.memory_manager.start()
         self.pending_memory_tasks = {}  # Track in-progress memory tasks
+
+        # Add session tracking parameters
+        self.session_timeout = 120  # Session timeout in seconds
+        self.last_activity = time.time()  # Track last activity time
+        self.last_memory_check = (
+            time.time()
+        )  # Track when we last checked for memory updates
+        self.memory_check_interval = 1.0  # Check for memory updates every second
 
         # Start agent trainer process
         self.agent_trainer = AgentTrainerProcess(registry_file=registry_file)
@@ -41,65 +156,27 @@ class MultiAgentOffice:
         self.last_trainer_check = (
             time.time()
         )  # Track when we last checked for trainer updates
-        self.trainer_check_interval = 5.0  # Check for trainer updates every 5 seconds
+        self.trainer_check_interval = (
+            TRAINER_CHECK_INTERVAL  # Check for trainer updates interval
+        )
         self.auto_improve_agents = (
             True  # Flag to enable/disable automatic agent improvement
         )
 
         # Track interaction counts for agents
         self.agent_interaction_counts = defaultdict(int)
-        # Track training status
-        self.training_status = defaultdict(
-            lambda: {"status": "idle", "last_updated": time.time()}
-        )
 
-        # Load memory for initial access
-        self.memory = self._load_memory_blocking()
-
-        # Add session tracking
-        self.active_agent = None  # Currently active agent, None means EA is active
-        self.session_context = {}  # Store context for each session
-        self.session_timeout = 120  # Session timeout in seconds
-        self.last_activity = time.time()  # Track last activity time
-        self.last_memory_check = (
-            time.time()
-        )  # Track when we last checked for memory updates
-        self.memory_check_interval = 1.0  # Check for memory updates every second
-
-        # EA system prompt
-        self.ea_system_prompt = (
-            "### Instruction:\n"
-            "You are an Executive Assistant (EA) that manages a team of specialized AI agents. Your role is to serve as the primary interface between the user and the AI Office system.\n\n"
-            "### Context:\n"
-            "- You have access to a memory system that stores important facts from previous conversations.\n"
-            "- You manage specialized agents with expertise in different domains like calendar management, research, technical work, creative writing, and personal assistance.\n"
-            "- You should handle general inquiries directly using your broad knowledge and memory access.\n"
-            "- Only delegate to specialized agents when a task clearly requires their specific expertise.\n\n"
-            "### Guidelines:\n"
-            "- Be proactive, professional, helpful, and concise in your responses.\n"
-            "- Maintain conversation continuity by referencing previous interactions when relevant.\n"
-            "- When responding to queries, integrate relevant information from memory naturally.\n"
-            "- Don't explicitly mention the agent system or delegation process unless specifically asked.\n"
-            "- When delegating, choose the most appropriate specialist for the task.\n"
-            "- For calendar and scheduling tasks, delegate to the calendar_manager.\n"
-            "- For research questions and information gathering, delegate to the research_assistant.\n"
-            "- For technical questions and coding help, delegate to the technical_expert.\n"
-            "- For creative content generation, delegate to the creative_writer.\n"
-            "- For personal advice and lifestyle questions, delegate to the personal_assistant.\n\n"
-            "### Response Format:\n"
-            "Provide clear, direct, and helpful responses. Organize information logically and concisely. When appropriate, use formatting like bullet points or numbered lists."
-        )
-
-        # Load or create registry
+        # Load existing agents from registry
         self.load_registry()
-        if not self.registry:
-            self.setup_default_agents()
 
         # Start agent processes
         self.start_agent_processes()
 
-        # Flag to track if previous query showed dissatisfaction
-        self.previous_query_showed_dissatisfaction = False
+        # Set up tracking for unsatisfied queries
+        self.recent_queries = []
+        self.dissatisfaction_threshold = (
+            3  # Number of dissatisfied queries before intervention
+        )
 
     def load_registry(self):
         """Load agent registry from file."""
@@ -395,27 +472,27 @@ class MultiAgentOffice:
         default_agents = {
             "calendar_manager": {
                 "system_prompt": "You are a calendar management specialist. Your job is to organize schedules, create agendas, and manage time efficiently. You help with scheduling meetings, tracking appointments, and planning events. When asked about calendar-related tasks, provide detailed and organized responses.",
-                "model": MODEL_NAME,
+                "model": DEFAULT_MODEL,
                 "temperature": 0.7,
             },
             "research_assistant": {
                 "system_prompt": "You are a research specialist. Your job is to find information, summarize content, and provide well-researched answers. You excel at answering factual questions, synthesizing complex topics, and providing balanced perspectives on various subjects.",
-                "model": MODEL_NAME,
+                "model": DEFAULT_MODEL,
                 "temperature": 0.7,
             },
             "technical_expert": {
                 "system_prompt": "You are a technical expert specialized in software, programming, and technology. You provide detailed explanations of technical concepts, help debug code issues, and offer guidance on best practices in software development and IT.",
-                "model": MODEL_NAME,
+                "model": DEFAULT_MODEL,
                 "temperature": 0.7,
             },
             "creative_writer": {
                 "system_prompt": "You are a creative writing specialist. Your job is to generate engaging, original content including stories, poems, scripts, and marketing copy. You can adapt your writing style to different tones and formats as requested.",
-                "model": MODEL_NAME,
+                "model": DEFAULT_MODEL,
                 "temperature": 0.7,
             },
             "personal_assistant": {
                 "system_prompt": "You are a personal life assistant. You help with personal tasks, offer advice on daily challenges, suggest self-improvement strategies, and provide thoughtful recommendations for health, wellness, and lifestyle choices.",
-                "model": MODEL_NAME,
+                "model": DEFAULT_MODEL,
                 "temperature": 0.7,
             },
         }
@@ -433,6 +510,20 @@ class MultiAgentOffice:
         if "### Instruction:" in base_prompt:
             return base_prompt
 
+        # Anti-hallucination and memory grounding instructions to add to all prompts
+        memory_grounding = (
+            "### MEMORY GROUNDING INSTRUCTIONS:\n"
+            "- You have NO general knowledge about the world.\n"
+            "- ONLY use information from:\n"
+            "  1. Facts provided in the context from previous conversations\n"
+            "  2. Information explicitly stated by the user in the current conversation\n"
+            "  3. Your core functions and specialized skills\n"
+            "- Never hallucinate or make up information not found in memory or the conversation.\n"
+            "- If you don't have relevant information available, explicitly say so.\n"
+            "- Always indicate the source of your information (memory, current conversation).\n"
+            "- Ask clarifying questions when needed rather than making assumptions.\n\n"
+        )
+
         # Format templates by agent type
         if agent_name == "calendar_manager":
             return (
@@ -442,6 +533,7 @@ class MultiAgentOffice:
                 "- You have access to facts about the user's schedule from previous conversations.\n"
                 "- The user will ask you to organize meetings, track appointments, plan events, and help manage their time.\n"
                 "- You must provide specific, actionable responses related to calendar and time management.\n\n"
+                + memory_grounding +
                 "### Guidelines:\n"
                 f"{base_prompt}\n\n"
                 "- Always clarify time zones when discussing meeting times.\n"
@@ -460,10 +552,12 @@ class MultiAgentOffice:
                 "You are a specialized Research Assistant Agent in an AI Office system. Your expertise is in finding information, summarizing content, and providing well-researched answers.\n\n"
                 "### Context:\n"
                 "- The user will ask you to research topics, find information, summarize articles, and answer factual questions.\n"
-                "- You should provide comprehensive, accurate, and balanced information on requested topics.\n\n"
+                "- You should provide comprehensive, accurate, and balanced information on requested topics.\n"
+                "- You must ONLY use information from the memory system or current conversation.\n\n"
+                + memory_grounding +
                 "### Guidelines:\n"
                 f"{base_prompt}\n\n"
-                "- Be thorough in your research and provide multiple perspectives when appropriate.\n"
+                "- Only present information that you can source from memory or the current conversation.\n"
                 "- Clearly distinguish between facts, theories, and opinions in your responses.\n"
                 "- Organize information logically with appropriate headings and sections.\n"
                 "- When citing sources, provide specific attribution.\n"
@@ -478,7 +572,9 @@ class MultiAgentOffice:
                 "You are a specialized Technical Expert Agent in an AI Office system. Your expertise is in software, programming, and technology concepts.\n\n"
                 "### Context:\n"
                 "- The user will ask you technical questions, request code solutions, and seek debugging help.\n"
-                "- You should provide clear technical explanations and practical coding solutions.\n\n"
+                "- You should provide clear technical explanations and practical coding solutions.\n"
+                "- You must ONLY use information from the memory system, current conversation, or your core technical skills.\n\n"
+                + memory_grounding +
                 "### Guidelines:\n"
                 f"{base_prompt}\n\n"
                 "- Explain technical concepts in clear, accessible language.\n"
@@ -496,7 +592,9 @@ class MultiAgentOffice:
                 "You are a specialized Creative Writing Agent in an AI Office system. Your expertise is in generating engaging, original content in various formats and styles.\n\n"
                 "### Context:\n"
                 "- The user will ask you to create stories, poems, scripts, marketing copy, and other creative content.\n"
-                "- You should adapt your writing style to match the requested tone and format.\n\n"
+                "- You should adapt your writing style to match the requested tone and format.\n"
+                "- While you can be creative, any facts you reference must come from memory or the conversation.\n\n"
+                + memory_grounding +
                 "### Guidelines:\n"
                 f"{base_prompt}\n\n"
                 "- Craft engaging content with vibrant descriptions and compelling narratives.\n"
@@ -514,7 +612,9 @@ class MultiAgentOffice:
                 "You are a specialized Personal Life Assistant Agent in an AI Office system. Your expertise is in providing advice on daily challenges and personal development.\n\n"
                 "### Context:\n"
                 "- The user will ask you for advice on personal matters, self-improvement strategies, and lifestyle choices.\n"
-                "- You should provide thoughtful, balanced guidance tailored to their needs.\n\n"
+                "- You should provide thoughtful, balanced guidance tailored to their needs.\n"
+                "- Your advice must be based on information from memory or the current conversation, not general knowledge.\n\n"
+                + memory_grounding +
                 "### Guidelines:\n"
                 f"{base_prompt}\n\n"
                 "- Offer empathetic, practical advice for personal challenges.\n"
@@ -532,7 +632,9 @@ class MultiAgentOffice:
             f"You are a specialized {agent_name} Agent in an AI Office system.\n\n"
             "### Context:\n"
             "- You are part of a team of AI agents with different specializations.\n"
-            "- You have been selected to handle this task based on your specific expertise.\n\n"
+            "- You have been selected to handle this task based on your specific expertise.\n"
+            "- You must ONLY use information from the memory system or current conversation.\n\n"
+            + memory_grounding +
             "### Guidelines:\n"
             f"{base_prompt}\n\n"
             "- Provide clear, specific, and actionable responses in your area of expertise.\n"
@@ -557,7 +659,7 @@ class MultiAgentOffice:
             agent_process = AgentProcess(
                 agent_name=agent_name,
                 system_prompt=system_prompt,
-                model_name=details.get("model", MODEL_NAME),
+                model_name=details.get("model", DEFAULT_MODEL),
                 pipe=child_conn,
             )
 
@@ -798,13 +900,16 @@ class MultiAgentOffice:
         # Special commands always go to EA
         if query.startswith("/"):
             # Reset active agent session when a command is used
-            self.active_agent = None
+            self.current_agent = None
             return self.handle_command(query)
 
         # Check for explicit handoff command (non-slash version)
         if query.lower() == "talk to ea":
-            self.active_agent = None
+            self.current_agent = None
             return "I'm now talking to the Executive Assistant. How can I help you?"
+
+        # Get the latest agent interaction from history (who responded last)
+        last_agent = self._get_last_agent_from_history()
 
         # Get relevant context from memory
         context = self.get_relevant_context(query)
@@ -813,49 +918,98 @@ class MultiAgentOffice:
         self.last_activity = time.time()
 
         # Check for session timeout
-        if self.active_agent and (
+        if self.current_agent and (
             time.time() - self.last_activity > self.session_timeout
         ):
             # Session expired, reset to EA
-            prev_agent = self.active_agent
-            self.active_agent = None
+            prev_agent = self.current_agent
+            self.current_agent = None
             return f"Your session with {prev_agent} has timed out. I'm now handling your requests. How can I help you?"
 
+        # If there is no current agent but there was a last agent that isn't the EA,
+        # and the user's message appears to be responding to that agent
+        if (not self.current_agent and
+            last_agent and
+            last_agent != "executive_assistant" and
+            last_agent in self.registry and
+            self._appears_to_be_response_to_agent(query)):
+
+            print(f"User appears to be responding to {last_agent}, routing message there...")
+            self.current_agent = last_agent
+            return self.delegate_to_agent(last_agent, query, context)
+
         # Route based on active agent
-        if self.active_agent:
+        if self.current_agent:
             # Implicit topic change detection - check if query seems unrelated to active agent
-            if self.is_topic_change(query, self.active_agent):
+            if self.is_topic_change(query, self.current_agent):
                 # Determine if another agent is better for this query
                 should_delegate, new_agent = self.should_delegate_to_agent(query)
 
                 if should_delegate:
                     # Topic has changed to another agent's expertise
-                    prev_agent = self.active_agent
-                    self.active_agent = new_agent
+                    prev_agent = self.current_agent
+                    self.current_agent = new_agent
                     print(f"Conversation shifted from {prev_agent} to {new_agent}...")
                     return self.delegate_to_agent(new_agent, query, context)
                 else:
                     # Topic has changed to something the EA can handle
-                    prev_agent = self.active_agent
-                    self.active_agent = None
+                    prev_agent = self.current_agent
+                    self.current_agent = None
                     print(f"Conversation shifted from {prev_agent} to EA...")
                     return self.handle_with_ea(query, context)
 
             # Continue with the active agent
-            print(f"Continuing conversation with agent '{self.active_agent}'...")
-            return self.delegate_to_agent(self.active_agent, query, context)
+            print(f"Continuing conversation with agent '{self.current_agent}'...")
+            return self.delegate_to_agent(self.current_agent, query, context)
         else:
             # No active agent (EA is handling), determine if we should delegate
             should_delegate, agent_name = self.should_delegate_to_agent(query)
 
             if should_delegate and agent_name:
                 # Begin a new session with this agent
-                self.active_agent = agent_name
+                self.current_agent = agent_name
                 print(f"EA is delegating to agent '{agent_name}'...")
                 return self.delegate_to_agent(agent_name, query, context)
             else:
                 print("EA is handling this directly...")
                 return self.handle_with_ea(query, context)
+
+    def _get_last_agent_from_history(self):
+        """Get the most recent agent that responded in the conversation."""
+        if not self.memory["conversation_history"]:
+            return None
+
+        # Get the most recent interaction
+        last_interaction = self.memory["conversation_history"][-1]
+        return last_interaction.get("agent")
+
+    def _appears_to_be_response_to_agent(self, query):
+        """Check if a query appears to be responding to a previous agent message."""
+        # Check for short responses that are likely replies
+        if len(query.split()) <= 5:
+            return True
+
+        # Check for response patterns
+        response_indicators = [
+            "yes", "no", "ok", "sure", "thanks", "thank", "good", "great",
+            "here", "that", "those", "they", "it", "this"
+        ]
+        query_lower = query.lower().strip()
+
+        # Check for answers to questions
+        if query_lower.startswith(tuple(response_indicators)):
+            return True
+
+        # Check for response to a request for information
+        if (":" in query or "," in query_lower.split()[0]) and len(query.split()) <= 10:
+            return True
+
+        # Check for direct answers to questions about times, dates, etc.
+        time_patterns = re.compile(r'\b(\d{1,2}[:\.]\d{2}|\d{1,2}\s*(am|pm|AM|PM))\b')
+        if time_patterns.search(query):
+            return True
+
+        return False
 
     def is_topic_change(self, query, current_agent):
         """Determine if the query represents a topic change from the current agent's domain."""
@@ -914,28 +1068,75 @@ class MultiAgentOffice:
         # By default, assume it's not a topic change
         return False
 
+    def _get_recent_conversation_context(self, agent_name=None, max_entries=3):
+        """Get recent conversation context relevant to the current interaction.
+
+        Args:
+            agent_name: If provided, only get conversations with this agent
+            max_entries: Maximum number of conversation entries to include
+
+        Returns:
+            str: Formatted conversation context string
+        """
+        if not self.memory["conversation_history"]:
+            return ""
+
+        # Get relevant history entries
+        history = self.memory["conversation_history"]
+        relevant_history = []
+
+        if agent_name:
+            # Get conversations with specified agent
+            agent_history = [entry for entry in history if entry.get("agent") == agent_name]
+            relevant_history = agent_history[-max_entries:] if agent_history else []
+        else:
+            # Get most recent conversations
+            relevant_history = history[-max_entries:]
+
+        if not relevant_history:
+            return ""
+
+        # Format the conversation context
+        context_str = "\nRECENT CONVERSATION HISTORY:\n"
+        for entry in relevant_history:
+            user_input = entry.get("user_input", "")
+            agent = entry.get("agent", "unknown")
+            response = entry.get("response", "")
+
+            agent_display_name = "Assistant" if agent == "executive_assistant" else agent.replace("_", " ").title()
+            context_str += f"User: {user_input}\n{agent_display_name}: {response}\n\n"
+
+        return context_str
+
     def handle_with_ea(self, query, context=None):
         """Have the Executive Assistant handle a query directly."""
         # Create the prompt with context if available
+        memory_context = ""
         if context:
             print(f"Adding {len(context)} relevant facts from memory")
-            context_str = "Based on our previous conversations, I have the following information that may be relevant:\n"
+            memory_context = "IMPORTANT MEMORY CONTEXT:\n"
+            memory_context += "The following facts are from our memory system and represent information from previous conversations. These are the ONLY facts you should reference outside of what's in the current conversation:\n\n"
 
             # Sort context by likely relevance
             sorted_context = self._order_context_by_relevance(context, query)
 
-            for fact in sorted_context:
-                context_str += f"- {fact}\n"
+            for i, fact in enumerate(sorted_context, 1):
+                memory_context += f"FACT {i}: {fact}\n"
 
             # Add a reminder to use this context
-            context_str += "\nPlease integrate this information into your response when appropriate."
-            full_prompt = f"{context_str}\n\nUser: {query}"
+            memory_context += "\nYou MUST ONLY reference these facts and information provided in the current conversation. Do not hallucinate or make up additional information."
         else:
-            full_prompt = f"User: {query}"
+            memory_context = "MEMORY CONTEXT: No relevant facts found in memory. You MUST ONLY reference information provided in the current conversation. Do not hallucinate or make up additional information."
+
+        # Add recent conversation context
+        conversation_context = self._get_recent_conversation_context()
+
+        # Combine all context elements
+        full_prompt = f"{memory_context}\n\n{conversation_context}\n===\n\nCURRENT USER REQUEST: {query}"
 
         # Create the LLM payload
         payload = {
-            "model": MODEL_NAME,
+            "model": DEFAULT_MODEL,
             "prompt": full_prompt,
             "stream": True,
             "options": {"temperature": 0.7, "max_tokens": 1000},
@@ -944,7 +1145,7 @@ class MultiAgentOffice:
 
         try:
             # Call the LLM API
-            response = requests.post(API_URL, json=payload, stream=True)
+            response = requests.post(DEFAULT_API_URL, json=payload, stream=True)
             response.raise_for_status()
 
             result = ""
@@ -998,8 +1199,8 @@ class MultiAgentOffice:
                 self.previous_query_showed_dissatisfaction = False
 
                 # If EA handled it directly after dissatisfaction, analyze active agent
-                if self.active_agent:
-                    self._analyze_agent_performance(self.active_agent)
+                if self.current_agent:
+                    self._analyze_agent_performance(self.current_agent)
 
             # Add to conversation history
             self.add_to_history(query, "executive_assistant", result)
@@ -1052,17 +1253,22 @@ class MultiAgentOffice:
         """Delegate a query to a specialized agent."""
         # Send the query to the agent process
         try:
+            memory_context = []
             if context:
                 print(f"Adding {len(context)} relevant facts from memory")
 
                 # Sort context for better relevance
-                sorted_context = self._order_context_by_relevance(context, query)
+                memory_context = self._order_context_by_relevance(context, query)
+
+            # Add recent conversation context
+            conversation_context = self._get_recent_conversation_context(agent_name=agent_name)
 
             self.agent_pipes[agent_name].send(
                 {
                     "type": "request",
                     "query": query,
-                    "context": sorted_context if context else [],
+                    "context": memory_context if memory_context else [],
+                    "conversation_history": conversation_context
                 }
             )
 
@@ -1151,7 +1357,7 @@ class MultiAgentOffice:
 
                         # Check if the agent wants to hand back control
                         if self.should_agent_handoff(query, full_response):
-                            self.active_agent = None
+                            self.current_agent = None
                             print(
                                 "Agent has completed its task and handed control back to EA"
                             )
@@ -1163,48 +1369,44 @@ class MultiAgentOffice:
 
                     # Handle error message
                     elif response_data["type"] == "error":
-                        self.active_agent = None  # Reset to EA on error
+                        self.current_agent = None  # Reset to EA on error
                         return f"Error from {agent_name}: {response_data['error']}"
                 else:
-                    self.active_agent = None  # Reset to EA on timeout
+                    self.current_agent = None  # Reset to EA on timeout
                     return f"Timeout waiting for response from {agent_name}."
         except Exception as e:
-            self.active_agent = None  # Reset to EA on exception
+            self.current_agent = None  # Reset to EA on exception
             return f"Error communicating with agent {agent_name}: {e}"
 
     def should_agent_handoff(self, query, response):
         """Determine if the agent should hand control back to the EA based on the response."""
-        # Check if response indicates a completed task
+        # Check if response explicitly indicates a completed task
         completion_indicators = [
-            "anything else",
-            "can I help you with anything else",
-            "is there anything else",
-            "do you need anything else",
-            "would you like me to",
-            "let me know if you need",
+            "anything else I can help you with",
+            "anything else I can assist you with",
+            "anything else you would like to know",
+            "any other questions",
+            "any other tasks",
+            "is there anything else you need help with",
         ]
 
         response_lower = response.lower()
+
+        # Only hand off if there's a very clear completion phrase
         if any(indicator in response_lower for indicator in completion_indicators):
             return True
 
-        # Check if this was a one-off informational query
-        if len(query.split()) >= 3 and (
-            "?" in query
-            or query.lower().startswith("what")
-            or query.lower().startswith("when")
-            or query.lower().startswith("where")
-            or query.lower().startswith("who")
-            or query.lower().startswith("how")
-        ):
-            # For questions that don't explicitly ask for follow-up actions
-            if not any(
-                indicator in response_lower
-                for indicator in ["would you like", "should I", "do you want me to"]
+        # Check if the response ends with a question that doesn't require continuation
+        final_sentences = re.split(r'[.!?]\s+', response.strip())
+        if final_sentences:
+            last_sentence = final_sentences[-1].lower()
+            # If the last sentence is not a question and contains a completion indicator
+            if not last_sentence.endswith("?") and any(
+                word in last_sentence for word in ["let me know", "feel free", "don't hesitate"]
             ):
                 return True
 
-        # Default: don't hand off unless we have clear signals
+        # More conservative about handing back to EA - in most cases, maintain the conversation
         return False
 
     def _cleanup_pending_tasks(self):
@@ -1227,23 +1429,33 @@ class MultiAgentOffice:
             "timestamp": timestamp,
             "user_input": query,
             "agent": agent_name,
-            "response": (
-                response[:200] + "..." if len(response) > 200 else response
-            ),  # Truncate long responses
+            "response": response if len(response) <= 200 else response[:197] + "...",  # Truncate long responses
         }
 
         self.memory["conversation_history"].append(history_entry)
 
         # Keep only the last 50 conversations in memory
         if len(self.memory["conversation_history"]) > 50:
-            self.memory["conversation_history"] = self.memory["conversation_history"][
-                -50:
-            ]
+            self.memory["conversation_history"] = self.memory["conversation_history"][-50:]
+
+        # Force synchronize with memory file to ensure persistence
+        task_id = str(uuid.uuid4())
+        self.memory_manager.task_queue.put({
+            "type": "add_history",
+            "history_entry": history_entry,
+            "task_id": task_id
+        })
+
+        self.pending_memory_tasks[task_id] = time.time()
+        print(f"Added conversation to history and sent to memory manager")
+
+        # Debug print
+        print(f"Current memory has {len(self.memory['conversation_history'])} history entries and {len(self.memory['facts'])} facts")
 
     def handle_command(self, command):
         """Handle special commands."""
         # Reset active agent
-        self.active_agent = None
+        self.current_agent = None
 
         # Handle existing commands
         if command == "/list_agents":
@@ -1354,7 +1566,7 @@ class MultiAgentOffice:
                 # Add to registry - store the original prompt
                 self.registry[agent_name] = {
                     "system_prompt": system_prompt,
-                    "model": MODEL_NAME,
+                    "model": DEFAULT_MODEL,
                     "temperature": 0.7,
                 }
                 self.save_registry()
@@ -1364,7 +1576,7 @@ class MultiAgentOffice:
                 agent_process = AgentProcess(
                     agent_name=agent_name,
                     system_prompt=enhanced_prompt,
-                    model_name=MODEL_NAME,
+                    model_name=DEFAULT_MODEL,
                     pipe=child_conn,
                 )
                 self.agent_processes[agent_name] = agent_process
@@ -1453,7 +1665,9 @@ class MultiAgentOffice:
                     agent_process = AgentProcess(
                         agent_name=agent_name,
                         system_prompt=enhanced_prompt,
-                        model_name=self.registry[agent_name].get("model", MODEL_NAME),
+                        model_name=self.registry[agent_name].get(
+                            "model", DEFAULT_MODEL
+                        ),
                         pipe=child_conn,
                     )
                     self.agent_processes[agent_name] = agent_process
@@ -1614,7 +1828,7 @@ class MultiAgentOffice:
             if len(parts) >= 2:
                 agent_name = parts[1]
                 if agent_name in self.registry:
-                    self.active_agent = agent_name
+                    self.current_agent = agent_name
                     return f"Switched conversation to agent '{agent_name}'. What would you like to discuss?"
                 else:
                     return f"Agent '{agent_name}' not found"
@@ -1622,8 +1836,8 @@ class MultiAgentOffice:
                 return "Invalid format. Use: /switch_to <agent_name>"
 
         elif command == "/who":
-            if self.active_agent:
-                return f"You are currently talking to: {self.active_agent}"
+            if self.current_agent:
+                return f"You are currently talking to: {self.current_agent}"
             else:
                 return "You are currently talking to the Executive Assistant"
 
@@ -1939,6 +2153,10 @@ class MultiAgentOffice:
         """Record an interaction with an agent for training purposes."""
         task_id = str(uuid.uuid4())
 
+        # Skip recording if the agent isn't in the registry (like executive_assistant)
+        if agent_name not in self.registry and agent_name != EA_AGENT_NAME:
+            return
+
         # Determine if this is a potentially problematic interaction
         is_problematic = self._check_query_for_dissatisfaction(query)
 
@@ -2155,7 +2373,7 @@ class MultiAgentOffice:
             agent_process = AgentProcess(
                 agent_name=agent_name,
                 system_prompt=enhanced_prompt,
-                model_name=self.registry[agent_name].get("model", MODEL_NAME),
+                model_name=self.registry[agent_name].get("model", DEFAULT_MODEL),
                 pipe=child_conn,
             )
             self.agent_processes[agent_name] = agent_process

@@ -52,39 +52,45 @@ class MemoryManagerProcess(Process):
 
         while not self.should_exit:
             try:
-                # Check for incoming tasks with a timeout to allow for shutdown
-                if not self.task_queue.empty():
-                    task = self.task_queue.get(timeout=0.5)
+                # Get task from queue (wait up to 1 second)
+                try:
+                    if self.task_queue.empty():
+                        time.sleep(0.1)  # Short sleep to reduce CPU usage
+                        continue
 
-                    # Support both old type field and new operation field
-                    task_type = task.get("type", task.get("operation"))
-                    if task_type == "extract":
-                        self._handle_extract_task(task)
-                    elif task_type == "read":
-                        self._handle_read_task(task)
-                    elif task_type == "query":
-                        self._handle_query_task(task)
-                    elif task_type == "clear":
-                        self._handle_clear_task(task)
-                    elif task_type == "shutdown":
-                        print("Memory Manager shutting down...")
-                        self.should_exit = True
+                    task = self.task_queue.get(timeout=1)
+                except Exception:
+                    # No task available
+                    continue
+
+                task_type = task.get("type")
+
+                # Process different task types
+                if task_type == "extract":
+                    # Extract facts from a conversation
+                    self._handle_extract_task(task)
+                elif task_type == "read":
+                    # Read the entire memory file
+                    self._handle_read_task(task)
+                elif task_type == "query":
+                    # Query memory for relevant facts
+                    self._handle_query_task(task)
+                elif task_type == "clear":
+                    # Clear memory
+                    self._handle_clear_task(task)
+                elif task_type == "add_history":
+                    # Add history entry directly
+                    self._handle_add_history_task(task)
+                elif task_type == "shutdown":
+                    print("Memory Manager shutting down...")
+                    self.should_exit = True
                 else:
-                    # Sleep briefly to avoid CPU spinning
-                    time.sleep(0.1)
+                    print(f"Unknown task type: {task_type}")
 
             except Exception as e:
                 print(f"Error in Memory Manager: {e}")
+                import traceback
                 print(traceback.format_exc())
-                # Send error to result queue
-                self.result_queue.put(
-                    {
-                        "operation": "error",
-                        "status": "error",
-                        "message": str(e),
-                        "task_id": task.get("task_id") if "task" in locals() else None,
-                    }
-                )
 
     def _handle_signal(self, signum, frame):
         """Handle termination signals gracefully."""
@@ -112,8 +118,9 @@ class MemoryManagerProcess(Process):
                 facts = contact_facts
                 print(f"[Memory] Extracted {len(facts)} contact information facts")
             else:
-                # Skip extraction for trivial or short interactions
-                if len(query) < 15:
+                # Only skip for very short interactions (reduced length threshold)
+                if len(query) < 5 and len(response) < 10:
+                    print(f"[Memory] Skipping extraction for very short interaction: {query}")
                     self.result_queue.put(
                         {
                             "operation": "extract_facts",
@@ -124,47 +131,18 @@ class MemoryManagerProcess(Process):
                     )
                     return
 
-                # Skip extraction for common chitchat and greetings
+                # Skip extraction only for the most basic greetings
                 common_trivial_phrases = [
                     "hello",
-                    "hi there",
-                    "how are you",
-                    "good morning",
-                    "good afternoon",
-                    "good evening",
+                    "hi",
                     "thanks",
                     "thank you",
-                    "goodbye",
                     "bye",
-                    "see you",
-                    "nice to meet you",
-                    "have a good day",
-                    "have a nice day",
-                    "how's it going",
                 ]
 
                 query_lower = query.lower()
-                if (
-                    any(phrase in query_lower for phrase in common_trivial_phrases)
-                    and len(query) < 30
-                ):
-                    print(f"[Memory] Skipping extraction for trivial query: {query}")
-                    self.result_queue.put(
-                        {
-                            "operation": "extract_facts",
-                            "status": "success",
-                            "facts": [],
-                            "task_id": task_id,
-                        }
-                    )
-                    return
-
-                # Analyze if the conversation is likely to contain important information
-                # Skip extraction if it's unlikely to have important facts
-                if not self._conversation_likely_important(query, response):
-                    print(
-                        f"[Memory] Skipping extraction for likely unimportant conversation"
-                    )
+                if query_lower in common_trivial_phrases and len(query) < 10:
+                    print(f"[Memory] Skipping extraction for basic greeting: {query}")
                     self.result_queue.put(
                         {
                             "operation": "extract_facts",
@@ -178,29 +156,56 @@ class MemoryManagerProcess(Process):
                 # Extract facts using LLM
                 facts = self._extract_facts(query, response)
 
+        # Add debug prints
+        print(f"[Memory] Pre-update facts count: {len(facts) if facts else 0}")
+
         # Update memory file with extracted facts
         if facts:
             print(f"[Memory] Extracted {len(facts)} facts")
-            # Update memory and get list of facts that were actually added or updated
-            effective_changes = self._update_memory_file(facts, query, response, agent)
+            try:
+                # Update memory and get list of facts that were actually added or updated
+                effective_changes = self._update_memory_file(facts, query, response, agent)
 
-            # For better feedback, format facts nicely
-            formatted_facts = []
-            for i, fact in enumerate(effective_changes, 1):
-                formatted_facts.append(f"  {i}. {fact}")
+                # Debug info
+                print(f"[Memory] Effective changes count: {len(effective_changes)}")
+                for i, fact in enumerate(effective_changes, 1):
+                    print(f"[Memory] Added new fact: {fact}")
 
-            # Include formatted facts in result
-            self.result_queue.put(
-                {
-                    "operation": "extract_facts",
-                    "status": "success",
-                    "facts": effective_changes,  # Only return facts that were actually added/updated
-                    "formatted_facts": formatted_facts,
-                    "agent": agent,
-                    "task_id": task_id,
-                }
-            )
+                # For better feedback, format facts nicely
+                formatted_facts = []
+                for i, fact in enumerate(effective_changes, 1):
+                    formatted_facts.append(f"  {i}. {fact}")
+
+                # Include formatted facts in result
+                self.result_queue.put(
+                    {
+                        "operation": "extract_facts",
+                        "status": "success",
+                        "facts": effective_changes,  # Only return facts that were actually added/updated
+                        "formatted_facts": formatted_facts,
+                        "agent": agent,
+                        "task_id": task_id,
+                    }
+                )
+
+                # Extra debug info
+                print(f"[Memory] Sent {len(effective_changes)} facts to result queue")
+            except Exception as e:
+                print(f"[Memory] Error in memory update: {e}")
+                import traceback
+                print(traceback.format_exc())
+
+                # Report error
+                self.result_queue.put(
+                    {
+                        "operation": "error",
+                        "status": "error",
+                        "message": f"Error updating memory: {str(e)}",
+                        "task_id": task_id,
+                    }
+                )
         else:
+            print("[Memory] No facts extracted")
             self.result_queue.put(
                 {
                     "operation": "extract_facts",
@@ -1142,6 +1147,57 @@ Do not include any explanations, notes, or text outside of the JSON array.
         )
 
         return combined_similarity
+
+    def _handle_add_history_task(self, task):
+        """Handle adding a conversation history entry directly to memory."""
+        history_entry = task.get("history_entry")
+        task_id = task.get("task_id")
+
+        if not history_entry:
+            self.result_queue.put({
+                "operation": "add_history",
+                "status": "error",
+                "message": "No history entry provided",
+                "task_id": task_id
+            })
+            return
+
+        try:
+            # Read current memory with shared lock first
+            memory = self._read_memory_file()
+
+            # Add the history entry
+            memory["conversation_history"].append(history_entry)
+
+            # Limit history size
+            if len(memory["conversation_history"]) > 50:
+                memory["conversation_history"] = memory["conversation_history"][-50:]
+
+            # Write updated memory with exclusive lock
+            success = self._write_memory_file(memory)
+
+            if success:
+                print(f"[Memory] Added history entry: {history_entry.get('agent')} - {history_entry.get('user_input')[:30]}...")
+                self.result_queue.put({
+                    "operation": "add_history",
+                    "status": "success",
+                    "task_id": task_id
+                })
+            else:
+                self.result_queue.put({
+                    "operation": "add_history",
+                    "status": "error",
+                    "message": "Failed to write memory file",
+                    "task_id": task_id
+                })
+        except Exception as e:
+            print(f"[Memory] Error adding history entry: {e}")
+            self.result_queue.put({
+                "operation": "add_history",
+                "status": "error",
+                "message": f"Error adding history entry: {str(e)}",
+                "task_id": task_id
+            })
 
 
 # For testing stand-alone functionality
