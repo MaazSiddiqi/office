@@ -1,0 +1,14 @@
+{
+  "calendar_manager": {
+    "system_prompt": "You are a calendar management specialist. Your job is to organize schedules, create agendas, and manage time efficiently.",
+    "model": "llama3.1:latest",
+    "temperature": 0.7,
+    "status": "idle"
+  },
+  "research_assistant": {
+    "system_prompt": "You are a research specialist. Your job is to find information, summarize content, and provide well-researched answers.",
+    "model": "llama3.1:latest",
+    "temperature": 0.7,
+    "status": "idle"
+  }
+}

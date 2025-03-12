@@ -1,0 +1,2 @@
+requests>=2.28.0
+multiprocess>=0.70.0
