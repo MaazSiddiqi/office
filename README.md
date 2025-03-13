@@ -4,6 +4,47 @@
 
 AI Office is a multi-agent AI system that simulates a professional office environment where specialized AI agents work collaboratively on tasks under the management of an Executive Assistant (EA). You, as the "CEO," interact exclusively with the EA, who orchestrates all agent activities on your behalf.
 
+## Installation
+
+### Prerequisites
+
+- Python 3.7+
+- [Ollama](https://ollama.ai/) with llama3.1 model installed
+
+### Setup
+
+1. Clone this repository
+2. Create and activate a virtual environment:
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. Make sure Ollama is running with the llama3.1 model:
+   ```bash
+   ollama run llama3.1
+   ```
+
+## Usage
+
+With the virtual environment activated, run:
+
+```bash
+python main.py
+```
+
+### Commands
+
+- `/task [description]` - Create a new task
+- `/status` - View all ongoing tasks
+- `/agents` - List available specialized agents
+- `/feedback [agent] [comments]` - Provide feedback on an agent's performance
+- `/help` - View available commands
+- `exit`, `quit`, `/exit` - End the session
+
 ## Key Features
 
 - **Executive Assistant (EA) as Single Point of Contact**: All user interactions flow through the EA, streamlining communication
@@ -51,22 +92,6 @@ AI Office is a multi-agent AI system that simulates a professional office enviro
 - Propagates user feedback to relevant agents
 - Automatically analyzes task success/failure
 - Refines system prompts based on performance data
-
-## Usage
-
-The AI Office is designed to be interacted with through a terminal interface:
-
-```
-$ python main.py
-```
-
-### Commands
-
-- `/task [description]` - Create a new task
-- `/status` - View all ongoing tasks
-- `/agents` - List available specialized agents
-- `/feedback [agent] [comments]` - Provide feedback on an agent's performance
-- `/help` - View available commands
 
 ## Development Status
 
