@@ -248,6 +248,16 @@ class OutputManager:
         )
 
     @staticmethod
+    def print_agent_response_prefix(agent_name):
+        """Print an agent response prefix with timestamp."""
+        timestamp = OutputManager.format_timestamp()
+        print(
+            f"{SUBTLE_COLOR}[{timestamp}] {EA_COLOR}EA ({agent_name}) {ARROW} {RESET}",
+            end="",
+            flush=True,
+        )
+
+    @staticmethod
     def print_welcome(width=80):
         """Print a nicely formatted welcome message."""
         # Title banner
@@ -271,12 +281,17 @@ class OutputManager:
         OutputManager.print_system_message(
             f"{BULLET} Fast query routing to specialized agents"
         )
+        OutputManager.print_system_message(
+            f"{BULLET} 'Sticky' agent delegation (stay with an agent until topic changes)"
+        )
+        OutputManager.print_system_message(
+            f"{BULLET} Long-term memory system for user preferences and information"
+        )
 
         # Future capabilities (not yet implemented)
         print()
         OutputManager.print_subtle("Coming Soon:")
         OutputManager.print_subtle(f"{BULLET} Parallel task execution")
-        OutputManager.print_subtle(f"{BULLET} Centralized memory system")
         OutputManager.print_subtle(f"{BULLET} Feedback and improvement loops")
 
         # Commands
@@ -284,6 +299,9 @@ class OutputManager:
         OutputManager.print_highlight("Commands:")
         OutputManager.print_system_message(
             f"{BULLET} /ask <agent> <query> {ARROW} Ask a specialized agent"
+        )
+        OutputManager.print_system_message(
+            f"{BULLET} /reset or /ea {ARROW} Return control to the Executive Assistant"
         )
         OutputManager.print_system_message(
             f"{BULLET} /agents {ARROW} List available agents"
@@ -302,6 +320,9 @@ class OutputManager:
         )
         OutputManager.print_system_message(
             f"{BULLET} /router fastest|fast|accurate {ARROW} Set router speed/accuracy mode"
+        )
+        OutputManager.print_system_message(
+            f"{BULLET} /memory {ARROW} View stored memory about you"
         )
         OutputManager.print_system_message(
             f"{BULLET} exit, quit, /exit {ARROW} End the session"

@@ -14,6 +14,7 @@ import time
 import datetime
 import sys
 import threading
+import re
 from output_manager import (
     OutputManager,
     SUBTLE_COLOR,
@@ -57,6 +58,12 @@ class ExecutiveAssistant:
         self.request_in_progress = False
         self.router_verbose = False
         self.memory_manager = get_memory_manager()
+
+        # Track the current delegated agent for sticky delegation
+        self.current_agent = None
+        self.consecutive_agent_queries = 0
+        # Threshold for confidence to switch away from current agent
+        self.agent_switch_threshold = 0.8
 
         # Define the EA system prompt with personality and role definition
         self.system_prompt = """You are an Executive Assistant (EA) in an AI Office environment, serving as the central coordinator of a team of specialized AI agents.
@@ -186,6 +193,89 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
 
         return False
 
+    def _should_delegate_query(self, query):
+        """
+        First-pass evaluation to determine if a query should be handled by the EA
+        or potentially delegated to a specialist.
+
+        Returns:
+            bool: True if query might need delegation, False if EA should handle it
+        """
+        # Quick check for common EA-specific queries
+        lower_query = query.lower()
+
+        # These patterns should always be handled by the EA
+        ea_patterns = [
+            # General greetings and casual conversation
+            r"^(hi|hello|hey|greetings|good morning|good afternoon|good evening)( there)?!?$",
+            # Questions about capabilities/help
+            r"(what can you|what do you|how do you|capabilities|features|help me)",
+            # Status and system queries
+            r"(status|how are you|how are things|what.?s up|what.?s new)",
+            # Personal questions to EA
+            r"(who are you|your name|about yourself|tell me about you)",
+            # Administrative commands
+            r"(list|show).*(agents|capabilities|commands)",
+            # Thank you messages
+            r"^(thanks|thank you|thx|ty)!?$",
+            # Goodbyes
+            r"(bye|goodbye|see you|farewell)",
+        ]
+
+        # If any EA pattern matches, EA should definitely handle this
+        for pattern in ea_patterns:
+            if re.search(pattern, lower_query, re.IGNORECASE):
+                return False  # EA should handle it
+
+        # If query is very short, likely conversational - EA should handle
+        if len(query.split()) <= 3 and "?" not in query:
+            return False
+
+        # Perform a very lightweight check for obvious specialist content
+        # These are high-precision patterns that strongly indicate specialist knowledge
+        specialist_patterns = {
+            "technical_specialist": [
+                r"code|function|programming|algorithm|debug|compile|error in|javascript|python|java|c\+\+|html|css"
+            ],
+            "research_assistant": [
+                r"research|find information about|look up|search for|news about|data on|statistics for"
+            ],
+            "calendar_manager": [
+                r"schedule|appointment|meeting|event|reminder|calendar|booking|reserve|reschedule|cancel meeting"
+            ],
+        }
+
+        # Check for obvious specialist content
+        for agent, patterns in specialist_patterns.items():
+            for pattern in patterns:
+                if (
+                    re.search(pattern, lower_query, re.IGNORECASE)
+                    and agent in self.registry.agent_processes
+                ):
+                    # Found a strong specialist pattern match
+                    return True
+
+        # If current agent exists and this appears to be a follow-up question, stay with the agent
+        # Check for follow-up indicators
+        follow_up_indicators = [
+            r"^(and|also|what about|how about)",
+            r"(another|additional|more|as well)",
+            r"(follow.up|related to that)",
+            r"^(so|then)",
+        ]
+
+        is_follow_up = any(
+            re.search(pattern, lower_query, re.IGNORECASE)
+            for pattern in follow_up_indicators
+        )
+
+        if self.current_agent and is_follow_up:
+            # This is likely a follow-up to the current agent conversation
+            return True
+
+        # By default, if nothing clearly indicates delegation, EA should handle it
+        return False
+
     def handle_directly(self, query, memory_context=None):
         """Handle a query directly with the Executive Assistant."""
         start_time = time.time()
@@ -199,6 +289,21 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
         # Display thinking message
         OutputManager.print_info("Handling directly...")
 
+        # Update the system prompt to include redirection instructions
+        ea_system_prompt = (
+            self.system_prompt
+            + """
+
+IMPORTANT: If you encounter a question that clearly requires specialized expertise beyond your capabilities,
+include the token "[NEEDS_SPECIALIST]" at the END of your response, followed by a brief explanation of
+which specialist would be better suited to answer this query. For example:
+
+"I don't have detailed information about that programming issue. [NEEDS_SPECIALIST] This query requires the technical_specialist."
+
+Only use this token if you're highly confident that specialized expertise is required for a proper response.
+"""
+        )
+
         # Create payload for the LLM API
         payload = {
             "model": MODEL_NAME,
@@ -208,7 +313,7 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
                 "temperature": 0.7,
                 "max_tokens": 500,
             },
-            "system": self.system_prompt,
+            "system": ea_system_prompt,
         }
 
         try:
@@ -220,6 +325,9 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
 
             # Display EA response start
             OutputManager.print_ea_response_prefix()
+
+            redirect_to_specialist = False
+            specialist_name = None
 
             # Process the streaming response
             for line in response.iter_lines():
@@ -238,6 +346,31 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
             # End the response line
             OutputManager.print_response("", end="\n")
 
+            # Check if EA indicated specialist redirection
+            redirect_match = re.search(
+                r"\[NEEDS_SPECIALIST\](.*?)(?:$|\.)", full_response
+            )
+            if redirect_match:
+                # Extract the part after the token
+                redirect_text = redirect_match.group(1).strip()
+                # Try to parse which specialist the EA recommended
+                for agent in self.registry.agent_processes:
+                    if agent.lower() in redirect_text.lower():
+                        specialist_name = agent
+                        break
+
+                if specialist_name:
+                    OutputManager.print_info(
+                        f"EA indicated this query requires {specialist_name} expertise."
+                    )
+                    # Remove the redirection token from memory
+                    full_response = full_response.replace(redirect_match.group(0), "")
+                    redirect_to_specialist = True
+                else:
+                    OutputManager.print_info(
+                        "EA indicated this needs specialist expertise, but couldn't determine which specialist."
+                    )
+
             # Calculate response time
             response_time = time.time() - start_time
             OutputManager.print_info(
@@ -252,6 +385,22 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
                     "timestamp": OutputManager.format_timestamp(),
                 }
             )
+
+            # If EA indicated redirection to a specialist, do it
+            if (
+                redirect_to_specialist
+                and specialist_name in self.registry.agent_processes
+            ):
+                OutputManager.print_info(
+                    f"Redirecting to {specialist_name} based on EA suggestion..."
+                )
+                self.current_agent = specialist_name
+                self.consecutive_agent_queries = 1
+                # Add context that this was redirected from EA
+                context = f"The Executive Assistant redirected this query to you because it requires your expertise.\n\nUser query: {query}"
+                if memory_context:
+                    context += f"\n\n{memory_context}"
+                self.delegate_to_agent(specialist_name, query, context)
 
             return full_response
 
@@ -279,6 +428,9 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
                 return
 
             # Directly delegate to the specified agent
+            # Update current agent for sticky delegation
+            self.current_agent = agent_name
+            self.consecutive_agent_queries = 1
             self.delegate_to_agent(agent_name, query)
 
             # Store the response in memory
@@ -290,6 +442,19 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
                 }
             )
 
+            return
+
+        # Check for command to clear current agent
+        if user_query.lower() == "/reset" or user_query.lower() == "/ea":
+            if self.current_agent:
+                previous_agent = self.current_agent
+                self.current_agent = None
+                self.consecutive_agent_queries = 0
+                OutputManager.print_info(
+                    f"Switched from {previous_agent} back to Executive Assistant"
+                )
+            else:
+                OutputManager.print_info("Already using Executive Assistant directly")
             return
 
         # Check for router commands
@@ -325,7 +490,92 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
         # Get memory context that might be relevant to this query
         memory_context = self.memory_manager.get_memory_for_prompt(user_query)
 
-        # Route the query to determine which agent should handle it
+        # Quick check for "what can you do" style queries - always handled by EA
+        lower_query = user_query.lower()
+        if any(
+            phrase in lower_query
+            for phrase in [
+                "what can you do",
+                "what can u do",
+                "what do you do",
+                "what are you capable",
+                "capabilities",
+                "features",
+                "help me",
+                "how do you work",
+            ]
+        ):
+            OutputManager.print_info(
+                "This query is about capabilities and will be handled by the EA directly."
+            )
+            self.current_agent = None
+            self.consecutive_agent_queries = 0
+            self.handle_directly(user_query, memory_context)
+            return
+
+        # If we have a current active agent, we should first check if we should continue with it
+        if self.current_agent and self.current_agent in self.registry.agent_processes:
+            # Let the router evaluate if the query is still relevant to the current agent
+            OutputManager.print_info(
+                f"Checking if query is still relevant for {self.current_agent}..."
+            )
+
+            # Get specialized prompt for evaluating agent relevance
+            eval_prompt = self.router.create_agent_relevance_prompt(
+                self.current_agent, user_query
+            )
+
+            # Get routing evaluation with the special prompt
+            evaluation = self.router.route_query(
+                user_prompt=user_query,
+                memory_context=memory_context,
+                system_prompt=eval_prompt,
+                force_json=True,
+            )
+
+            # Check if we should continue with the current agent
+            if (
+                isinstance(evaluation, dict)
+                and "agent" in evaluation
+                and evaluation["agent"].lower() == self.current_agent.lower()
+                and evaluation.get("confidence", 0) > 0.8
+            ):
+                # Continue with the current agent
+                OutputManager.print_info(f"Continuing with {self.current_agent}...")
+                self.consecutive_agent_queries += 1
+                self.delegate_to_agent(self.current_agent, user_query, memory_context)
+                return
+            else:
+                # Switch away from the current agent
+                reasoning = evaluation.get("reasoning", "Not specialized enough")
+                OutputManager.print_info(
+                    f"Query is no longer suitable for {self.current_agent}, switching to EA: {reasoning}"
+                )
+                # Reset agent tracking
+                previous_agent = self.current_agent
+                self.current_agent = None
+                self.consecutive_agent_queries = 0
+
+                # By default, handle with EA unless the query is HIGHLY specialized
+                OutputManager.print_info(
+                    "Query will be handled by the Executive Assistant"
+                )
+                self.handle_directly(user_query, memory_context)
+                return
+
+        # Only reach here for the first query or if we haven't returned after agent switching
+        # NEW: Perform first-pass evaluation to see if EA should handle this query
+        should_delegate = self._should_delegate_query(user_query)
+
+        if not should_delegate:
+            # EA should handle this query directly based on first-pass check
+            OutputManager.print_info(
+                "Query will be handled directly by the Executive Assistant"
+            )
+            self.handle_directly(user_query, memory_context)
+            return
+
+        # Only perform routing if first-pass indicates potential delegation
         OutputManager.print_info("Analyzing query...")
 
         result = self.router.route_query(
@@ -348,25 +598,35 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
                 OutputManager.print_info(f"Reasoning: {reasoning}")
                 OutputManager.print_info(f"Routing took {routing_time:.2f} seconds")
 
-            # Special case for 'none' agent (no agents available)
+            # Special case for 'none' agent (means EA should handle it directly)
             if agent == "none":
                 OutputManager.print_info(
-                    "No specialized agents available. Handling directly."
+                    "Query will be handled directly by the Executive Assistant."
                 )
+                self.current_agent = None
+                self.consecutive_agent_queries = 0
                 self.handle_directly(user_query, memory_context)
                 return
 
-            # Check if the agent exists
-            if agent in self.registry.agent_processes:
+            # Check if the agent exists AND has high confidence
+            if agent in self.registry.agent_processes and confidence >= 0.85:
+                # Update current agent for sticky delegation
+                self.current_agent = agent
+                self.consecutive_agent_queries = 1
                 self.delegate_to_agent(agent, user_query, memory_context)
             else:
-                OutputManager.print_error(
-                    f"Selected agent '{agent}' not available. Handling directly."
+                # If confidence is too low or agent doesn't exist, fall back to EA
+                OutputManager.print_info(
+                    f"Agent '{agent}' has insufficient confidence ({confidence:.2f}). Handling directly."
                 )
                 # Fall back to EA handling the query directly
+                self.current_agent = None
+                self.consecutive_agent_queries = 0
                 self.handle_directly(user_query, memory_context)
         else:
             OutputManager.print_error("Failed to route query. Handling directly.")
+            self.current_agent = None
+            self.consecutive_agent_queries = 0
             self.handle_directly(user_query, memory_context)
 
     def delegate_to_agent(self, agent_name, query, memory_context=None):
@@ -381,20 +641,42 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
         else:
             enhanced_query = query
 
+        # Update agent system prompt with redirection instructions
+        agent_system_override = f"""If you encounter a query that is clearly outside your area of expertise, add the token "[REDIRECT_TO_EA]" at
+the END of your response, followed by a brief explanation of why this query should be handled by the Executive Assistant instead.
+
+For example: "I don't have enough information to answer questions about general user preferences. [REDIRECT_TO_EA] This query would be better handled by the Executive Assistant."
+
+Only use this token if you're confident the query is not relevant to your expertise as a {agent_name}."""
+
+        # Add system prompt override to the query
+        enhanced_query = (
+            f"{enhanced_query}\n\n[SYSTEM_PROMPT_ADDITION]\n{agent_system_override}"
+        )
+
         # Display thinking animation
         OutputManager.print_info(f"Delegating to {agent_name}...")
 
-        # Print the EA response prefix for the agent's response
-        OutputManager.print_ea_response_prefix()
+        # Print the agent response prefix for the agent's response
+        OutputManager.print_agent_response_prefix(agent_name)
+
+        # Temporary variable to collect full response
+        full_response = ""
+        redirect_to_ea = False
 
         # Callback for processing the streaming response
         def process_response(message):
+            nonlocal full_response
+
             if message["type"] == "response":
                 # Print the response chunk if there is one
                 if "response" in message and message["response"]:
                     response_chunk = message["response"]
                     # Print the response without a newline
                     OutputManager.print_response(response_chunk, end="")
+
+                    # Add to full response
+                    full_response += response_chunk
 
                     # Store the response in memory if it's not an error
                     if not message.get("is_error", False):
@@ -427,3 +709,31 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
         # Calculate and display response time
         response_time = time.time() - start_time
         OutputManager.print_info(f"Response completed in {response_time:.2f} seconds")
+
+        # Check if agent indicated redirection back to EA
+        redirect_match = re.search(r"\[REDIRECT_TO_EA\](.*?)(?:$|\.)", full_response)
+        if redirect_match:
+            # Extract the reasoning after the redirect token
+            redirect_text = redirect_match.group(1).strip()
+            OutputManager.print_info(
+                f"Agent indicated redirection to EA: {redirect_text}"
+            )
+
+            # Reset agent tracking
+            self.current_agent = None
+            self.consecutive_agent_queries = 0
+
+            # Get memory context and handle with EA
+            memory_context = self.memory_manager.get_memory_for_prompt(query)
+
+            # Add context about the redirection
+            redirect_context = f"The {agent_name} redirected this query to you because: {redirect_text}\n\n"
+            if memory_context:
+                redirect_context += memory_context
+
+            OutputManager.print_info("Redirecting to Executive Assistant...")
+            self.handle_directly(query, redirect_context)
+
+            return full_response
+
+        return response

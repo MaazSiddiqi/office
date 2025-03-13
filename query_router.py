@@ -95,16 +95,32 @@ Your job is to analyze user queries and determine which agent would be best suit
 Available specialist agents:
 {agent_desc_text}
 
+Executive Assistant (EA):
+The EA is the default handler for most user queries, particularly those that are general,
+conversational, or do not clearly require specialized expertise. The EA has personal memory
+and knowledge about the user, and should handle any query that doesn't STRONGLY require
+specialized knowledge.
+
 For each query, determine:
-1. Which single agent is best suited to handle this query
+1. Which single agent is best suited to handle this query, or if the Executive Assistant should handle it
 2. A confidence score (0.0-1.0) in your routing decision
 3. Brief reasoning for your choice
 
 Respond with a JSON object containing:
 {{"agent": "agent_name", "confidence": 0.8, "reasoning": "Brief explanation"}}
 
-Use ONLY the agent names listed above.
-If no agent is clearly suitable, pick the most general purpose agent with a lower confidence score."""
+Use ONLY the agent names listed above or "none" to indicate the Executive Assistant should handle it.
+
+IMPORTANT GUIDELINES:
+- The EA (agent: "none") should be the DEFAULT choice for most queries
+- Only route to a specialist agent if the query ABSOLUTELY REQUIRES their specific expertise
+- Specialist agents should ONLY handle queries that CANNOT be reasonably handled by the EA
+- General questions, personal topics, small talk, and anything not clearly requiring specialized expertise should ALWAYS be handled by the EA (agent: "none")
+- Require at least 0.85 confidence to route to a specialist agent, otherwise default to the EA
+- "What can you do" style questions should ALWAYS be handled by the EA (agent: "none")
+- Questions about capabilities, features, or how things work should ALWAYS be handled by the EA
+- Greetings, farewells, thank you messages, and short responses should ALWAYS be handled by the EA
+- When in doubt, ALWAYS choose the EA (agent: "none")"""
 
     def _init_keywords(self):
         """Initialize keywords for fastest routing mode."""
@@ -245,7 +261,9 @@ If no agent is clearly suitable, pick the most general purpose agent with a lowe
 
         # Find the agent with the most matches
         max_matches = max(matches.values())
-        if max_matches > 0:
+
+        # Require more keyword matches for delegation (increased threshold)
+        if max_matches > 2:  # Requiring at least 3 matches now (was effectively 1)
             # Get all agents with the maximum number of matches
             top_agents = [
                 agent for agent, count in matches.items() if count == max_matches
@@ -263,7 +281,8 @@ If no agent is clearly suitable, pick the most general purpose agent with a lowe
             if len(top_agents) == 1:
                 chosen_agent = top_agents[0]
                 # Calculate confidence based on match count (higher matches = higher confidence)
-                confidence = min(0.7 + (0.05 * max_matches), 0.95)
+                # Start with a higher base confidence since we already required more matches
+                confidence = min(0.75 + (0.05 * max_matches), 0.95)
 
                 # Map generic agent name to actual agent name if needed
                 if (
@@ -280,7 +299,7 @@ If no agent is clearly suitable, pick the most general purpose agent with a lowe
                         "reasoning": f"Matched {max_matches} keywords related to {chosen_agent}",
                     }
 
-        # No clear keyword match or no available agents
+        # No clear keyword match or no available agents, or not enough matches
         return None
 
     def map_agent_name(self, agent_name: str) -> str:
@@ -464,3 +483,43 @@ If no agent is clearly suitable, pick the most general purpose agent with a lowe
             "confidence": 0.3,
             "reasoning": "Default fallback when all else fails",
         }
+
+    # Create a special evaluation prompt for checking if a query is still relevant for current agent
+    def create_agent_relevance_prompt(self, agent_name, query):
+        """Create a specialized prompt for evaluating if a query is still relevant for an agent.
+
+        Args:
+            agent_name (str): The current agent name
+            query (str): The user query
+
+        Returns:
+            str: The specialized system prompt
+        """
+        return f"""You are evaluating if a user query is still relevant for the currently active agent.
+
+Current agent: {agent_name}
+
+For this evaluation, you should be VERY strict. Only determine that the query is still relevant
+for the current agent if the query CLEARLY requires this agent's specific expertise.
+
+If the query is general, about capabilities, about how things work, or can be handled by a general assistant,
+it should be handled by the Executive Assistant instead.
+
+Evaluation guidelines:
+1. Is this query CLEARLY within the {agent_name}'s specialized expertise domain?
+2. Does this query REQUIRE specialized knowledge that only the {agent_name} would have?
+3. Would routing this to the Executive Assistant (EA) result in a worse user experience?
+
+Unless ALL THREE conditions are met with high confidence, the Executive Assistant should handle it.
+
+"What can you do" style questions should ALWAYS be handled by the EA.
+Questions about capabilities, features, or how things work should be handled by the EA.
+
+Respond with a JSON object:
+{{"agent": "{agent_name}", "confidence": 0.9, "reasoning": "Explanation"}}
+
+OR
+
+{{"agent": "none", "confidence": 0.8, "reasoning": "Explanation"}}
+
+Only use one of these two options."""
