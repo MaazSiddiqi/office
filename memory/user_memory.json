@@ -1,0 +1,27 @@
+{
+  "preferences": [
+    {
+      "content": "The user likes to play soccer",
+      "timestamp": "22:37:39",
+      "source": "conversation"
+    },
+    {
+      "content": "The user likes to play",
+      "timestamp": "22:45:16",
+      "source": "conversation"
+    }
+  ],
+  "characteristics": [
+    {
+      "content": "The user's name is maaz",
+      "timestamp": "22:37:05",
+      "source": "conversation"
+    }
+  ],
+  "background": [],
+  "work": [],
+  "projects": [],
+  "schedule": [],
+  "relationships": [],
+  "technical_knowledge": []
+}

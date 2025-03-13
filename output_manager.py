@@ -84,6 +84,15 @@ class OutputManager:
         print(f"{SUBTLE_COLOR}{message}{RESET}")
 
     @staticmethod
+    def print_response(chunk, end=None):
+        """Print a response chunk from an agent or EA with appropriate styling."""
+        # If end is specified, use it, otherwise default to newline
+        if end is not None:
+            print(f"{EA_COLOR}{chunk}{RESET}", end=end, flush=True)
+        else:
+            print(f"{EA_COLOR}{chunk}{RESET}", flush=True)
+
+    @staticmethod
     def format_timestamp():
         """Return a formatted timestamp string."""
         return datetime.datetime.now().strftime("%H:%M:%S")

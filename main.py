@@ -15,6 +15,7 @@ import sys
 from executive_assistant import ExecutiveAssistant
 from output_manager import OutputManager
 from agent_registry import get_registry
+from memory_manager import get_memory_manager
 
 
 def shutdown_handler():
@@ -24,6 +25,10 @@ def shutdown_handler():
     # Shutdown all agent processes
     registry = get_registry()
     registry.shutdown_agents()
+
+    # Shutdown memory manager
+    memory_manager = get_memory_manager()
+    memory_manager.shutdown()
 
 
 def main():
@@ -47,6 +52,11 @@ def main():
     signal.signal(signal.SIGINT, handle_interrupt)
     signal.signal(signal.SIGTERM, handle_interrupt)
 
+    # Initialize the Memory Manager
+    memory_manager = get_memory_manager()
+    memory_pid = memory_manager.initialize_process()
+    OutputManager.print_info(f"Memory Manager initialized (PID: {memory_pid})")
+
     # Initialize the Executive Assistant
     ea = ExecutiveAssistant()
 
@@ -65,6 +75,12 @@ def main():
         print("* /router → Show router status")
         print("* /router verbose | fast → Set verbosity mode")
         print("* /router fastest | fast | accurate → Set speed/accuracy mode")
+        print()
+
+        # Display memory commands
+        print("Memory commands:")
+        print("* /memory → Show memory summary")
+        print("* /memory <category> → Show memories for a specific category")
         print()
     elif agents:
         OutputManager.print_warning("No agents are currently running")
@@ -97,6 +113,15 @@ def main():
                     OutputManager.print_warning("No agents are currently running")
                 continue
 
+            # Check for memory commands
+            elif user_input.lower().startswith("/memory"):
+                parts = user_input.lower().split(maxsplit=1)
+                category = parts[1] if len(parts) > 1 else None
+
+                memory_summary = memory_manager.get_memory_summary(category)
+                OutputManager.print_info(f"Memory Summary: {memory_summary}")
+                continue
+
             # Check for agent status command
             elif user_input.lower() == "/status":
                 OutputManager.print_info("Agent Status:")
@@ -117,6 +142,17 @@ def main():
                     else:
                         OutputManager.print_warning(f"{agent}: ✗ NOT RUNNING")
 
+                # Show memory status
+                if (
+                    memory_manager.memory_process
+                    and memory_manager.memory_process.is_alive()
+                ):
+                    OutputManager.print_success(
+                        f"Memory Manager (PID {memory_manager.memory_process.pid}): ✓ RUNNING"
+                    )
+                else:
+                    OutputManager.print_warning("Memory Manager: ✗ NOT RUNNING")
+
                 # Show agent command help
                 print()
                 OutputManager.print_system_message("Agent Commands:")
@@ -131,6 +167,16 @@ def main():
 
             # Process the input
             ea.generate_response(user_input)
+
+            # Add the user's message to memory
+            memory_manager.add_observation(
+                {
+                    "role": "user",
+                    "content": user_input,
+                    "timestamp": OutputManager.format_timestamp(),
+                }
+            )
+
         except KeyboardInterrupt:
             print("\nReceived keyboard interrupt.")
             continue_session = input("Do you want to exit? (y/n): ").lower()

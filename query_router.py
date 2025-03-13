@@ -5,463 +5,462 @@ AI Office v2 - Query Router
 ==========================
 
 This module defines the QueryRouter class, which analyzes user queries and determines
-if they should be delegated to a specialized agent and which agent to use.
+which agent would be best suited to handle them.
 """
 
 import json
 import requests
 import time
-from output_manager import SUBTLE_COLOR, RESET
+import re
+from typing import Dict, Any, List, Optional, Union
+from output_manager import OutputManager
+from agent_registry import get_registry
 
-# Configuration
-ROUTER_MODEL = "llama3.2:latest"  # Using more capable but still fast model for routing
+# Router configuration
+ROUTER_MODEL = "llama3.2:latest"  # Using a capable model for accurate routing
 API_URL = "http://localhost:11434/api/generate"
+
+# Map internal agent names to actual agent names
+AGENT_NAME_MAP = {
+    "coder": "technical_specialist",
+    "writer": "creative_assistant",  # This may not exist yet
+    "researcher": "research_assistant",
+    "planner": "calendar_manager",
+}
 
 
 class QueryRouter:
-    """
-    Analyzes user queries and determines if they should be delegated to a specialized agent.
+    """Routes user queries to appropriate specialist agents based on query content."""
 
-    This class uses a small, fast LLM to:
-    1. Analyze user input
-    2. Determine if the query should be handled by the EA or delegated
-    3. Select the appropriate agent for delegation if needed
-    """
-
-    def __init__(self, registry, enabled=True, verbose=False, speed_mode="fast"):
-        """
-        Initialize the Query Router.
+    def __init__(self, speed_mode="fast"):
+        """Initialize the query router.
 
         Args:
-            registry: The agent registry containing available agents
-            enabled (bool): Whether the router is enabled (default: True)
-            verbose (bool): Whether to include verbose debugging in prompts
-            speed_mode (str): Routing speed/accuracy tradeoff: "fastest", "fast", or "accurate"
+            speed_mode (str): The routing speed mode: "fastest", "fast", or "accurate"
         """
-        self.registry = registry
-        self.verbose = verbose
-        self.speed_mode = (
-            speed_mode  # New parameter for routing speed/accuracy tradeoff
+        self.speed_mode = speed_mode
+        self.registry = get_registry()
+
+        # Get actual available agents
+        self.available_agents = (
+            list(self.registry.agent_processes.keys()) if self.registry else []
         )
-        self.system_prompt = self._build_system_prompt()
-        self.debug_log = []
-        self.enabled = enabled
+
+        # System prompt for the router
+        self._create_system_prompt()
 
         # Keywords for fastest mode
-        self.technical_keywords = [
-            "code",
-            "program",
-            "debug",
-            "python",
-            "javascript",
-            "coding",
-            "java",
-            "c++",
-            "ruby",
-            "algorithm",
-            "function",
-            "compile",
-        ]
-        self.research_keywords = [
-            "information",
-            "weather",
-            "news",
-            "research",
-            "find out",
-            "what is",
-            "when did",
-            "who is",
-            "where is",
-            "history",
-            "data",
-            "statistics",
-        ]
-        self.calendar_keywords = [
-            "schedule",
-            "appointment",
-            "calendar",
-            "meeting",
-            "remind",
-            "event",
-            "date",
-            "time",
-            "planning",
-            "reservation",
-        ]
+        self._init_keywords()
 
-    def _build_system_prompt(self):
-        """
-        Build the system prompt for the routing LLM based on available agents.
-
-        Returns:
-            str: The system prompt for the routing LLM
-        """
-        # Get available agents
-        available_agents = self.registry.list_available_agents()
-        running_agents = list(self.registry.agent_processes.keys())
-
-        # Build agent descriptions - shorter and more focused
+    def _create_system_prompt(self):
+        """Create the appropriate system prompt based on the current configuration."""
+        # Build list of available agents with descriptions
         agent_descriptions = []
-        for agent_name in running_agents:
-            agent_config = self.registry.get_agent_info(agent_name)
-            if agent_config and "description" in agent_config:
-                description = agent_config["description"]
-            else:
-                # Use default descriptions if not specified in config
-                if agent_name == "research_assistant":
+
+        # Check if we have actual agents running
+        running_agents = self.available_agents
+
+        if running_agents:
+            for agent_name in running_agents:
+                # Get a description for this agent
+                description = "Unknown"
+                if agent_name == "technical_specialist":
+                    description = "Programming, coding, debugging, software development, technical questions"
+                elif agent_name == "research_assistant":
                     description = "Research, information retrieval, current events, weather, news, facts"
                 elif agent_name == "calendar_manager":
                     description = (
                         "Scheduling, appointments, time management, dates, reminders"
                     )
-                elif agent_name == "technical_specialist":
-                    description = "Programming, coding, debugging, software development, technical questions"
-                elif agent_name == "example_agent":
-                    description = "Demo agent"
-                else:
-                    description = f"{agent_name.replace('_', ' ')} tasks"
+                elif agent_name == "creative_assistant":
+                    description = "Writing, editing, summarizing text, creative writing"
 
-            agent_descriptions.append(f"- {agent_name}: {description}")
+                agent_descriptions.append(f'- "{agent_name}": {description}')
+        else:
+            # Use generic descriptions if no agents are running
+            agent_descriptions = [
+                f'- "coder": Programming, software development, code review, debugging',
+                f'- "writer": Writing, editing, summarizing text, creative writing',
+                f'- "researcher": Finding information, data analysis, summarizing research',
+                f'- "planner": Task planning, project management, scheduling, organization',
+            ]
 
-        # Create a more direct prompt focused on correct classification
-        system_prompt = f"""You are a query classifier that determines if a user query should be handled by a specialized agent.
+        # Join agent descriptions with newlines
+        agent_desc_text = "\n".join(agent_descriptions)
 
-AVAILABLE AGENTS:
-{chr(10).join(agent_descriptions)}
+        # Base system prompt with agent descriptions
+        self.system_prompt = f"""You are a query routing system for an AI Office with specialist agents.
+Your job is to analyze user queries and determine which agent would be best suited to respond.
 
-YOUR TASK:
-Analyze the query and decide whether the EA should handle it directly or delegate it to a specialized agent.
+Available specialist agents:
+{agent_desc_text}
 
-MUST RESPOND AS VALID JSON with this structure:
-{{
-    "delegate": true/false,
-    "agent": "agent_name_here",  // Include ONLY if delegate is true
-    "confidence": 0.0-1.0,  // How confident you are
-    "explanation": "Brief explanation"
-}}
+For each query, determine:
+1. Which single agent is best suited to handle this query
+2. A confidence score (0.0-1.0) in your routing decision
+3. Brief reasoning for your choice
 
-DELEGATION RULES:
-- Delegate if the query clearly matches an agent's expertise
-- Research questions go to research_assistant
-- Technical and programming questions go to technical_specialist
-- Scheduling and calendar questions go to calendar_manager
-- DON'T delegate general conversation or small talk
-- DON'T delegate system questions or questions about the AI office itself
-- ONLY delegate to the available agents listed above
+Respond with a JSON object containing:
+{{"agent": "agent_name", "confidence": 0.8, "reasoning": "Brief explanation"}}
 
-EXAMPLES:
-User: "What's the weather in New York today?"
-{{
-    "delegate": true,
-    "agent": "research_assistant",
-    "confidence": 0.9,
-    "explanation": "Weather information requires external research"
-}}
+Use ONLY the agent names listed above.
+If no agent is clearly suitable, pick the most general purpose agent with a lower confidence score."""
 
-User: "How do I debug Python code?"
-{{
-    "delegate": true,
-    "agent": "technical_specialist",
-    "confidence": 0.95,
-    "explanation": "Programming and debugging questions should go to technical specialist"
-}}
-
-User: "Tell me about yourself"
-{{
-    "delegate": false,
-    "confidence": 0.9,
-    "explanation": "General question about the system should be handled by EA"
-}}
-
-IMPORTANT: Output ONLY valid JSON. No markdown, no explanation, just the JSON object."""
-
-        # Add more verbose instructions if needed
-        if self.verbose:
-            system_prompt += """
-
-ADDITIONAL GUIDANCE:
-- Be precise in your analysis of the query
-- Consider both explicit and implicit requirements in the query
-- Technical questions include programming languages, debugging, coding, etc.
-- Research questions include facts, news, events, data, etc.
-- Calendar queries include scheduling, time management, dates, etc.
-- Higher confidence (>0.8) should only be given when the match is very clear
-- Always return properly formatted JSON with all required fields"""
-
-        return system_prompt
-
-    def keyword_routing(self, user_query):
-        """
-        Perform simple keyword-based routing for extremely fast decision making.
-
-        Args:
-            user_query (str): The user's query
-
-        Returns:
-            dict or None: Routing decision if a clear match is found, None otherwise
-        """
-        query_lower = user_query.lower()
-
-        # Check for technical keywords
-        for keyword in self.technical_keywords:
-            if keyword in query_lower:
-                if "technical_specialist" in self.registry.agent_processes:
-                    self.debug_log.append(
-                        "Fast-tracked to technical_specialist based on keywords"
-                    )
-                    return {
-                        "delegate": True,
-                        "agent": "technical_specialist",
-                        "confidence": 0.85,
-                        "explanation": f"Query contains technical keyword: '{keyword}'",
-                    }
-
-        # Check for research keywords
-        for keyword in self.research_keywords:
-            if keyword in query_lower:
-                if "research_assistant" in self.registry.agent_processes:
-                    self.debug_log.append(
-                        "Fast-tracked to research_assistant based on keywords"
-                    )
-                    return {
-                        "delegate": True,
-                        "agent": "research_assistant",
-                        "confidence": 0.85,
-                        "explanation": f"Query contains research keyword: '{keyword}'",
-                    }
-
-        # Check for calendar keywords
-        for keyword in self.calendar_keywords:
-            if keyword in query_lower:
-                if "calendar_manager" in self.registry.agent_processes:
-                    self.debug_log.append(
-                        "Fast-tracked to calendar_manager based on keywords"
-                    )
-                    return {
-                        "delegate": True,
-                        "agent": "calendar_manager",
-                        "confidence": 0.85,
-                        "explanation": f"Query contains calendar keyword: '{keyword}'",
-                    }
-
-        # No clear keyword match found
-        return None
-
-    def route_query(
-        self, user_query, conversation_history=None, cancel_check_callback=None
-    ):
-        """
-        Analyze a user query and determine if it should be delegated to a specialized agent.
-
-        Args:
-            user_query (str): The user's query
-            conversation_history (list, optional): Recent conversation history for context
-            cancel_check_callback (callable, optional): Function to check if request should be cancelled
-
-        Returns:
-            dict: A dictionary with routing information:
-                - delegate (bool): Whether to delegate this query
-                - agent (str): Which agent to delegate to (if delegate=True)
-                - confidence (float): Confidence score (0.0-1.0)
-                - explanation (str): Explanation of the routing decision
-        """
-        # Clear previous debug log
-        self.debug_log = []
-
-        # Skip analysis if router is disabled
-        if not self.enabled:
-            return {
-                "delegate": False,
-                "confidence": 0.0,
-                "explanation": "Router is disabled",
-            }
-
-        # Default result if API fails
-        default_result = {
-            "delegate": False,
-            "confidence": 0.0,
-            "explanation": "Failed to analyze query",
+    def _init_keywords(self):
+        """Initialize keywords for fastest routing mode."""
+        self.keywords = {
+            "technical_specialist": [
+                "code",
+                "program",
+                "programming",
+                "develop",
+                "function",
+                "bug",
+                "debugging",
+                "software",
+                "algorithm",
+                "github",
+                "repository",
+                "git",
+                "python",
+                "javascript",
+                "typescript",
+                "java",
+                "c++",
+                "rust",
+                "html",
+                "css",
+                "api",
+                "backend",
+                "frontend",
+                "database",
+                "sql",
+                "error",
+                "framework",
+                "library",
+                "class",
+                "object",
+            ],
+            "research_assistant": [
+                "research",
+                "information",
+                "data",
+                "analysis",
+                "find",
+                "search",
+                "summary",
+                "statistics",
+                "facts",
+                "evidence",
+                "study",
+                "report",
+                "topic",
+                "question",
+                "investigate",
+                "explore",
+                "examine",
+                "understand",
+                "learn",
+                "knowledge",
+                "weather",
+                "news",
+                "current events",
+                "history",
+                "science",
+                "technology",
+            ],
+            "calendar_manager": [
+                "plan",
+                "schedule",
+                "organize",
+                "task",
+                "project",
+                "goal",
+                "productivity",
+                "time",
+                "management",
+                "calendar",
+                "deadline",
+                "reminder",
+                "priority",
+                "workflow",
+                "efficiency",
+                "habit",
+                "strategy",
+                "objective",
+                "track",
+                "meeting",
+                "appointment",
+                "event",
+                "date",
+            ],
         }
 
-        # Check for cancellation before starting
-        if cancel_check_callback and cancel_check_callback():
+        # Add backward compatibility for generic names
+        self.keywords["coder"] = self.keywords["technical_specialist"]
+        self.keywords["researcher"] = self.keywords["research_assistant"]
+        self.keywords["planner"] = self.keywords["calendar_manager"]
+        self.keywords["writer"] = [
+            "write",
+            "writing",
+            "essay",
+            "article",
+            "blog",
+            "content",
+            "story",
+            "edit",
+            "grammar",
+            "text",
+            "paragraph",
+            "summarize",
+            "creative",
+            "proofread",
+            "poem",
+            "novel",
+            "screenplay",
+            "email",
+            "letter",
+            "document",
+            "copywriting",
+            "review",
+        ]
+
+    def keyword_routing(self, query: str) -> Optional[Dict[str, Any]]:
+        """Perform fast keyword-based routing without using an LLM.
+
+        Args:
+            query (str): The user query
+
+        Returns:
+            Optional[Dict]: Routing result or None if no clear match
+        """
+        query = query.lower()
+
+        # Count keyword matches for each agent
+        matches = {agent: 0 for agent in self.keywords}
+        for agent, agent_keywords in self.keywords.items():
+            for keyword in agent_keywords:
+                if keyword in query:
+                    matches[agent] += 1
+
+        # Find the agent with the most matches
+        max_matches = max(matches.values())
+        if max_matches > 0:
+            # Get all agents with the maximum number of matches
+            top_agents = [
+                agent for agent, count in matches.items() if count == max_matches
+            ]
+
+            # Filter to only include available agents if possible
+            available_top_agents = [
+                agent for agent in top_agents if agent in self.available_agents
+            ]
+
+            if available_top_agents:
+                top_agents = available_top_agents
+
+            # If there's a clear winner
+            if len(top_agents) == 1:
+                chosen_agent = top_agents[0]
+                # Calculate confidence based on match count (higher matches = higher confidence)
+                confidence = min(0.7 + (0.05 * max_matches), 0.95)
+
+                # Map generic agent name to actual agent name if needed
+                if (
+                    chosen_agent in AGENT_NAME_MAP
+                    and AGENT_NAME_MAP[chosen_agent] in self.available_agents
+                ):
+                    chosen_agent = AGENT_NAME_MAP[chosen_agent]
+
+                # Only return if the agent is actually available
+                if chosen_agent in self.available_agents:
+                    return {
+                        "agent": chosen_agent,
+                        "confidence": round(confidence, 2),
+                        "reasoning": f"Matched {max_matches} keywords related to {chosen_agent}",
+                    }
+
+        # No clear keyword match or no available agents
+        return None
+
+    def map_agent_name(self, agent_name: str) -> str:
+        """Map generic agent name to actual agent name if needed."""
+        # If the agent name is already available, use it
+        if agent_name in self.available_agents:
+            return agent_name
+
+        # Try to map the name
+        if agent_name in AGENT_NAME_MAP:
+            mapped_name = AGENT_NAME_MAP[agent_name]
+            if mapped_name in self.available_agents:
+                return mapped_name
+
+        # If we can't map it or the mapped name isn't available,
+        # return the first available agent with lower confidence
+        if self.available_agents:
+            return self.available_agents[0]
+
+        # If no agents are available, return the original name
+        return agent_name
+
+    def route_query(
+        self,
+        user_prompt: str,
+        memory_context: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        model_preference: Optional[str] = None,
+        force_json: bool = False,
+    ) -> Dict[str, Any]:
+        """Route a user query to the appropriate agent.
+
+        Args:
+            user_prompt (str): The user's query
+            memory_context (str, optional): Memory context to include in the prompt
+            system_prompt (str, optional): Override the default system prompt
+            model_preference (str, optional): Override the speed mode for this query
+            force_json (bool): Force the response to be valid JSON
+
+        Returns:
+            Dict: The routing decision with agent name and confidence
+        """
+        # Update available agents before routing
+        self.available_agents = (
+            list(self.registry.agent_processes.keys()) if self.registry else []
+        )
+
+        # If no agents are available, return a default response
+        if not self.available_agents:
             return {
-                "delegate": False,
+                "agent": "none",
                 "confidence": 0.0,
-                "explanation": "Query routing cancelled",
+                "reasoning": "No agents are currently available",
             }
 
-        # If in fastest mode, try keyword routing first
-        if self.speed_mode == "fastest":
-            keyword_result = self.keyword_routing(user_query)
+        # First, check if we should use fastest mode (keyword-based routing)
+        if self.speed_mode == "fastest" and not system_prompt:
+            keyword_result = self.keyword_routing(user_prompt)
             if keyword_result:
                 return keyword_result
 
-        # Configure retry parameters - adjust based on speed mode
-        max_retries = 1 if self.speed_mode == "fast" else 2
-        timeout = 5 if self.speed_mode == "fast" else 8  # Shorter timeout for fast mode
-        retry_delay = 0.3 if self.speed_mode == "fast" else 0.5
+        # If keyword routing didn't produce a result or wasn't used, fall back to LLM
+        # Determine which model to use based on mode or override
+        mode = model_preference or self.speed_mode
 
-        for attempt in range(max_retries + 1):
+        # Select the appropriate model based on the speed/accuracy mode
+        model = ROUTER_MODEL
+        if mode == "fastest":
+            model = "tinyllama"  # Smallest, fastest model
+        elif mode == "fast":
+            model = "llama3.1:latest"  # Good balance of speed and accuracy
+
+        # Use system prompt override if provided, otherwise use default
+        prompt_to_use = system_prompt or self.system_prompt
+
+        # Prepare the user prompt with memory context if available
+        enhanced_prompt = user_prompt
+        if memory_context:
+            enhanced_prompt = f"{user_prompt}\n\n{memory_context}"
+
+        # Set up retry parameters
+        max_retries = 2 if force_json else 1
+        retry_count = 0
+        timeout = 10.0  # seconds
+
+        while retry_count <= max_retries:
             try:
-                # Check for cancellation
-                if cancel_check_callback and cancel_check_callback():
-                    return {
-                        "delegate": False,
-                        "confidence": 0.0,
-                        "explanation": "Query routing cancelled",
-                    }
-
-                # Prepare minimal context from conversation history if available
-                context = ""
-                if conversation_history and len(conversation_history) > 0:
-                    # Include only the last exchange for minimal context
-                    last_entry = conversation_history[-1]
-                    speaker = (
-                        "User" if last_entry.get("role") == "user" else "Assistant"
+                # Log what we're doing
+                (
+                    OutputManager.print_info(
+                        f"Routing query using {model} in {mode} mode"
                     )
-                    context = f"Last message: {speaker}: {last_entry.get('content', '')[:100]}...\n\n"
+                    if mode == "accurate"
+                    else None
+                )
 
-                # Create the prompt for the LLM - keep it short
-                prompt = f"{context}User: {user_query}\n\n"
-
-                # Create payload for the LLM API - optimize for accuracy or speed based on mode
+                # Create payload for the LLM API
                 payload = {
-                    "model": ROUTER_MODEL,
-                    "prompt": prompt,
+                    "model": model,
+                    "prompt": enhanced_prompt,
                     "stream": False,
                     "options": {
-                        "temperature": 0.1,
-                        "max_tokens": 200,
-                        "num_ctx": 512,  # Small context window
-                        "num_thread": 4,  # More threads for faster inference
+                        "temperature": 0.1,  # Low temperature for more deterministic routing
+                        "max_tokens": 300,
                     },
-                    "system": self.system_prompt,
+                    "system": prompt_to_use,
                 }
 
-                # Log the attempt
-                self.debug_log.append(
-                    f"Router API call attempt {attempt+1}/{max_retries+1}"
-                )
-
                 # Call the LLM API
-                start_time = time.time()
-                response = None
-                with requests.Session() as session:
-                    response = session.post(API_URL, json=payload, timeout=timeout)
+                response = requests.post(API_URL, json=payload, timeout=timeout)
+                response.raise_for_status()
+                response_data = response.json()
 
-                if response:
-                    response.raise_for_status()
-                    response_data = response.json()
-                    elapsed_time = time.time() - start_time
+                if "response" in response_data:
+                    response_text = response_data["response"].strip()
 
-                    # Log the routing time
-                    self.debug_log.append(
-                        f"Router LLM call completed in {elapsed_time:.2f}s"
-                    )
+                    # Extract the JSON part from the response
+                    try:
+                        # First try to parse the entire response as JSON
+                        result = json.loads(response_text)
 
-                    # Extract and parse the JSON response
-                    if "response" in response_data:
-                        try:
-                            # Clean the response to ensure it's valid JSON
-                            json_str = response_data["response"].strip()
+                        # If we have an agent field, check and map the agent name
+                        if "agent" in result:
+                            result["agent"] = self.map_agent_name(result["agent"])
 
-                            # Save the raw response for debugging
-                            self.debug_log.append(f"Raw response: {json_str[:100]}...")
-
-                            # Remove any markdown code block markers
-                            if json_str.startswith("```json"):
-                                json_str = json_str[7:]
-                            if json_str.startswith("```"):
-                                json_str = json_str[3:]
-                            if json_str.endswith("```"):
-                                json_str = json_str[:-3]
-
-                            # Find the JSON object if there's extra text
-                            start_idx = json_str.find("{")
-                            end_idx = json_str.rfind("}")
-
-                            if start_idx >= 0 and end_idx >= 0:
-                                json_str = json_str[start_idx : end_idx + 1]
-
-                            json_str = json_str.strip()
-
+                        return result
+                    except json.JSONDecodeError:
+                        # If that fails, try to extract JSON from the text
+                        json_match = re.search(r"({[\s\S]*})", response_text)
+                        if json_match:
                             try:
-                                result = json.loads(json_str)
-                            except json.JSONDecodeError as e:
-                                self.debug_log.append(f"JSON decode error: {e}")
+                                result = json.loads(json_match.group(1))
 
-                                # Try to fix common JSON format issues
-                                json_str = json_str.replace(
-                                    "'", '"'
-                                )  # Replace single quotes with double quotes
-                                json_str = json_str.replace(
-                                    "True", "true"
-                                )  # Fix Python-style booleans
-                                json_str = json_str.replace("False", "false")
-
-                                # Try again with the fixed JSON
-                                result = json.loads(json_str)
-
-                            # Validate the result structure
-                            if "delegate" not in result:
-                                raise ValueError("Missing 'delegate' field in response")
-
-                            if result.get("delegate") and "agent" not in result:
-                                raise ValueError("Missing 'agent' field for delegation")
-
-                            # Check if the specified agent is available
-                            if result.get("delegate"):
-                                agent_name = result.get("agent")
-                                if agent_name not in self.registry.agent_processes:
-                                    # Modify the result if the agent isn't running
-                                    result["delegate"] = False
-                                    result["explanation"] = (
-                                        f"Agent '{agent_name}' is not currently running"
+                                # If we have an agent field, check and map the agent name
+                                if "agent" in result:
+                                    result["agent"] = self.map_agent_name(
+                                        result["agent"]
                                     )
 
-                            # Ensure confidence is a float between 0 and 1
-                            if "confidence" in result:
-                                try:
-                                    conf = float(result["confidence"])
-                                    result["confidence"] = max(0.0, min(1.0, conf))
-                                except (ValueError, TypeError):
-                                    result["confidence"] = 0.5
+                                return result
+                            except json.JSONDecodeError:
+                                if retry_count < max_retries:
+                                    retry_count += 1
+                                    continue
 
-                            return result
-                        except (json.JSONDecodeError, ValueError) as e:
-                            self.debug_log.append(f"Error parsing router response: {e}")
-                            self.debug_log.append(
-                                f"Raw response: {response_data['response']}"
-                            )
-                    else:
-                        self.debug_log.append(
-                            "No response field in router API response"
-                        )
+                                # Return a fallback result on final failure
+                                if force_json:
+                                    return {"error": "Failed to parse JSON response"}
+                                else:
+                                    # Pick the first available agent with low confidence
+                                    return {
+                                        "agent": self.available_agents[0],
+                                        "confidence": 0.3,
+                                        "reasoning": "Fallback due to parsing error",
+                                    }
 
-                # If we got here with a response but couldn't parse it, break the retry loop
-                break
-
-            except requests.Timeout:
-                self.debug_log.append(
-                    f"Router API call timed out (attempt {attempt+1}/{max_retries+1})"
-                )
-
-                if attempt < max_retries:
-                    self.debug_log.append(f"Retrying in {retry_delay} seconds...")
-                    time.sleep(retry_delay)
+                # If we can't parse JSON, return the raw response
+                return {"content": response_text}
 
             except Exception as e:
-                self.debug_log.append(f"Error in router API call: {e}")
+                retry_count += 1
+                if retry_count > max_retries:
+                    # Return a fallback result on failure
+                    if force_json:
+                        return {"error": f"Error calling LLM API: {str(e)}"}
+                    else:
+                        # Pick the first available agent with low confidence
+                        return {
+                            "agent": (
+                                self.available_agents[0]
+                                if self.available_agents
+                                else "none"
+                            ),
+                            "confidence": 0.3,
+                            "reasoning": f"Error: {str(e)}",
+                        }
 
-                if attempt < max_retries:
-                    self.debug_log.append(f"Retrying in {retry_delay} seconds...")
-                    time.sleep(retry_delay)
-
-        # If we got here, all retries failed
-        self.debug_log.append("All router API attempts failed")
-        return default_result
-
-    def update_system_prompt(self):
-        """Update the system prompt based on current available agents."""
-        self.system_prompt = self._build_system_prompt()
+        # Default fallback (should rarely get here)
+        return {
+            "agent": self.available_agents[0] if self.available_agents else "none",
+            "confidence": 0.3,
+            "reasoning": "Default fallback when all else fails",
+        }

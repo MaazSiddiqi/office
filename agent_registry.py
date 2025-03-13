@@ -444,12 +444,22 @@ class AgentRegistry:
 
                         # Call the callback if provided
                         if response_callback and callable(response_callback):
-                            response_callback(message)
+                            try:
+                                response_callback(message)
+                            except Exception as e:
+                                print(
+                                    f"{SUBTLE_COLOR}Exception in response callback: {e}{RESET}"
+                                )
 
                     elif message["type"] == "status":
                         # Status updates can be handled by the callback
                         if response_callback and callable(response_callback):
-                            response_callback(message)
+                            try:
+                                response_callback(message)
+                            except Exception as e:
+                                print(
+                                    f"{SUBTLE_COLOR}Exception in status callback: {e}{RESET}"
+                                )
 
                 # Check if the process is still alive
                 if not self.agent_processes[agent_name].is_alive():
