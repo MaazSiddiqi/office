@@ -36,6 +36,7 @@ ERROR = "!"
 THINKING = "..."
 PROMPT = ">"
 
+
 class OutputManager:
     """
     Handles all terminal output formatting and display for the AI Office system.
@@ -87,7 +88,12 @@ class OutputManager:
         """Display a simple thinking animation."""
         start_time = time.time()
         i = 0
-        thinking_states = ["/", "-", "\\", "|"]  # Simpler animation that works in all terminals
+        thinking_states = [
+            "/",
+            "-",
+            "\\",
+            "|",
+        ]  # Simpler animation that works in all terminals
 
         print(f"{SUBTLE_COLOR}", end="")
         sys.stdout.write("Thinking ")
@@ -112,14 +118,20 @@ class OutputManager:
     def print_ea_response_prefix():
         """Print the EA response prefix with timestamp."""
         timestamp = OutputManager.format_timestamp()
-        print(f"{SUBTLE_COLOR}[{timestamp}] {EA_COLOR}EA {ARROW} {RESET}", end="", flush=True)
+        print(
+            f"{SUBTLE_COLOR}[{timestamp}] {EA_COLOR}EA {ARROW} {RESET}",
+            end="",
+            flush=True,
+        )
 
     @staticmethod
     def print_welcome(width=80):
         """Print a nicely formatted welcome message."""
         # Title banner
         OutputManager.print_divider(width)
-        print(f"{HIGHLIGHT_COLOR}AI Office v2{RESET}{SYSTEM_COLOR} - Executive Assistant")
+        print(
+            f"{HIGHLIGHT_COLOR}AI Office v2{RESET}{SYSTEM_COLOR} - Executive Assistant"
+        )
         OutputManager.print_divider(width)
 
         # App description
@@ -144,7 +156,9 @@ class OutputManager:
         # Commands
         print()
         OutputManager.print_highlight("Commands:")
-        OutputManager.print_system_message(f"{BULLET} exit, quit, /exit {ARROW} End the session")
+        OutputManager.print_system_message(
+            f"{BULLET} exit, quit, /exit {ARROW} End the session"
+        )
 
         # Divider
         print()
