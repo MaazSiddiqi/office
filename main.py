@@ -11,6 +11,7 @@ import os
 import datetime
 import atexit
 import signal
+import sys
 from executive_assistant import ExecutiveAssistant
 from output_manager import OutputManager
 from agent_registry import get_registry
@@ -35,8 +36,16 @@ def main():
 
     # Register the shutdown handler
     atexit.register(shutdown_handler)
-    signal.signal(signal.SIGINT, lambda sig, frame: exit(0))
-    signal.signal(signal.SIGTERM, lambda sig, frame: exit(0))
+
+    # Custom signal handler for cleaner exit
+    def handle_interrupt(sig, frame):
+        print("\nReceived interrupt signal. Shutting down...")
+        shutdown_handler()
+        sys.exit(0)
+
+    # Register signal handlers
+    signal.signal(signal.SIGINT, handle_interrupt)
+    signal.signal(signal.SIGTERM, handle_interrupt)
 
     # Initialize the Executive Assistant
     ea = ExecutiveAssistant()
@@ -51,64 +60,88 @@ def main():
 
     # Add command info for agent interaction if there are agents
     if running_agents:
-        # Commands are already displayed in the welcome message, so no need to repeat them here
-        pass
+        # Display routing information
+        print("Router commands:")
+        print("* /router → Show router status")
+        print("* /router verbose | fast → Set verbosity mode")
+        print("* /router fastest | fast | accurate → Set speed/accuracy mode")
+        print()
     elif agents:
         OutputManager.print_warning("No agents are currently running")
 
+    print()  # Add a blank line for spacing
+
     # Main interaction loop
     while True:
-        # Get user input with timestamp
-        user_input = input(OutputManager.print_user_input_prompt())
+        try:
+            # Get user input
+            user_input = input(f"[{OutputManager.format_timestamp()}] You -> ")
 
-        # Check for exit commands
-        if user_input.lower() in ["exit", "quit", "/exit"]:
-            OutputManager.print_warning("\nEnding session. Goodbye!")
-            break
+            # Handle special case: empty input
+            if not user_input.strip():
+                continue
 
-        # Check for agent listing command
-        elif user_input.lower() == "/agents":
-            running_agents = list(registry.agent_processes.keys())
-            if running_agents:
-                OutputManager.print_success(
-                    f"Running agents: {', '.join(running_agents)}"
-                )
-            else:
-                OutputManager.print_warning("No agents are currently running")
-            continue
+            # Handle exit commands
+            if user_input.lower() in ["exit", "quit", "/exit"]:
+                print("Ending session. Goodbye!")
+                break
 
-        # Check for agent status command
-        elif user_input.lower() == "/status":
-            OutputManager.print_info("Agent Status:")
-
-            # Show configured agents
-            all_agents = registry.list_available_agents()
-            running_agents = list(registry.agent_processes.keys())
-
-            for agent in all_agents:
-                if agent in running_agents:
-                    agent_process = registry.agent_processes[agent]
-                    pid = agent_process.pid
-                    alive = "✓ RUNNING" if agent_process.is_alive() else "✗ STOPPED"
-                    model = registry.agents[agent].get("model", "unknown")
+            # Check for agent listing command
+            elif user_input.lower() == "/agents":
+                running_agents = list(registry.agent_processes.keys())
+                if running_agents:
                     OutputManager.print_success(
-                        f"{agent} (PID {pid}): {alive}, Model: {model}"
+                        f"Running agents: {', '.join(running_agents)}"
                     )
                 else:
-                    OutputManager.print_warning(f"{agent}: ✗ NOT RUNNING")
+                    OutputManager.print_warning("No agents are currently running")
+                continue
 
-            # Show agent command help
-            print()
-            OutputManager.print_system_message("Agent Commands:")
-            OutputManager.print_system_message(
-                "/ask <agent> <query> → Ask an agent a question"
-            )
-            OutputManager.print_system_message("/agents → List running agents")
-            OutputManager.print_system_message("/status → Show detailed agent status")
-            continue
+            # Check for agent status command
+            elif user_input.lower() == "/status":
+                OutputManager.print_info("Agent Status:")
 
-        # Generate and print response
-        ea.generate_response(user_input)
+                # Show configured agents
+                all_agents = registry.list_available_agents()
+                running_agents = list(registry.agent_processes.keys())
+
+                for agent in all_agents:
+                    if agent in running_agents:
+                        agent_process = registry.agent_processes[agent]
+                        pid = agent_process.pid
+                        alive = "✓ RUNNING" if agent_process.is_alive() else "✗ STOPPED"
+                        model = registry.agents[agent].get("model", "unknown")
+                        OutputManager.print_success(
+                            f"{agent} (PID {pid}): {alive}, Model: {model}"
+                        )
+                    else:
+                        OutputManager.print_warning(f"{agent}: ✗ NOT RUNNING")
+
+                # Show agent command help
+                print()
+                OutputManager.print_system_message("Agent Commands:")
+                OutputManager.print_system_message(
+                    "/ask <agent> <query> → Ask an agent a question"
+                )
+                OutputManager.print_system_message("/agents → List running agents")
+                OutputManager.print_system_message(
+                    "/status → Show detailed agent status"
+                )
+                continue
+
+            # Process the input
+            ea.generate_response(user_input)
+        except KeyboardInterrupt:
+            print("\nReceived keyboard interrupt.")
+            continue_session = input("Do you want to exit? (y/n): ").lower()
+            if continue_session.startswith("y"):
+                print("Ending session. Goodbye!")
+                break
+            print("Continuing session...")
+        except Exception as e:
+            OutputManager.print_error(f"Error processing input: {e}")
+
+    # Clean exit will trigger the shutdown_handler via atexit
 
 
 if __name__ == "__main__":

@@ -13,8 +13,17 @@ import requests
 import time
 import datetime
 import sys
-from output_manager import OutputManager, SUBTLE_COLOR, RESET, EA_COLOR, ARROW
+import threading
+from output_manager import (
+    OutputManager,
+    SUBTLE_COLOR,
+    RESET,
+    EA_COLOR,
+    ARROW,
+    ERROR_COLOR,
+)
 from agent_registry import get_registry
+from query_router import QueryRouter, ROUTER_MODEL
 
 # Configuration
 MODEL_NAME = "llama3.1:latest"  # Using local LLM
@@ -31,6 +40,11 @@ class ExecutiveAssistant:
         """Initialize the Executive Assistant."""
         self.conversation_history = []
         self.registry = get_registry()
+        self.router = QueryRouter(
+            self.registry, enabled=True, verbose=False, speed_mode="fast"
+        )
+        self.auto_delegation_enabled = True
+        self.request_in_progress = False
 
         # Define the EA system prompt with personality and role definition
         self.system_prompt = """You are an Executive Assistant (EA) in an AI Office environment, serving as the central coordinator of a team of specialized AI agents.
@@ -104,6 +118,9 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
         if agent_name not in self.registry.agent_processes:
             return f"Agent '{agent_name}' is not currently running or available."
 
+        # Mark request as in progress
+        self.request_in_progress = True
+
         # Print the agent response prefix
         timestamp = OutputManager.format_timestamp()
         print(
@@ -115,10 +132,11 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
         # Track whether we've started printing the response
         is_printing = False
         last_chunk_newline = False
+        full_response = ""
 
         # Define a callback to handle streaming responses
         def handle_response_chunk(message):
-            nonlocal is_printing, last_chunk_newline
+            nonlocal is_printing, last_chunk_newline, full_response
 
             if message["type"] == "status":
                 if message["status"] == "starting":
@@ -128,6 +146,7 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
             elif message["type"] == "response":
                 # Regular responses are printed normally
                 chunk = message.get("response", "")
+                full_response += chunk
 
                 if chunk:
                     # Print the chunk
@@ -143,19 +162,116 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
                 ):
                     print()  # Add a newline at the end if needed
 
-        # Send the query to the agent and get streaming responses
-        response = self.registry.send_request_to_agent(
-            agent_name, query, handle_response_chunk
-        )
+            return False  # Continue receiving chunks
 
-        # Add a newline if we didn't get any output
-        if not is_printing:
-            print()
+        try:
+            # Send the query to the agent and get streaming responses
+            response = self.registry.send_request_to_agent(
+                agent_name, query, handle_response_chunk
+            )
 
-        # Print a divider to separate responses
-        OutputManager.print_divider()
+            # Add a newline if we didn't get any output
+            if not is_printing:
+                print()
 
-        return response
+            # Print a divider to separate responses
+            OutputManager.print_divider()
+
+            return response
+        finally:
+            # End the request
+            self.request_in_progress = False
+
+    def handle_auto_delegation(self, user_input, timestamp):
+        """
+        Use the QueryRouter to determine if the query should be delegated to an agent.
+
+        Args:
+            user_input (str): The user's query
+            timestamp (str): Timestamp for the query
+
+        Returns:
+            tuple: (delegated (bool), response (str))
+        """
+        # Check if auto delegation is enabled
+        if not self.auto_delegation_enabled:
+            return False, None
+
+        # First check if there are any running agents
+        running_agents = list(self.registry.agent_processes.keys())
+        if not running_agents:
+            return False, None
+
+        # Mark request as in progress
+        self.request_in_progress = True
+
+        try:
+            # Use the router to analyze the query
+            start_time = time.time()
+            routing_decision = self.router.route_query(
+                user_input, self.conversation_history
+            )
+            routing_time = time.time() - start_time
+
+            # Log the routing decision
+            if hasattr(self.router, "debug_log") and self.router.debug_log:
+                # When routing fails, show more diagnostic information
+                if routing_decision.get("confidence", 0) <= 0.1:
+                    print(
+                        f"{SUBTLE_COLOR}Router: Failed to analyze query. Handling with EA.{RESET}"
+                    )
+                    # Add more detailed error info
+                    for log_entry in self.router.debug_log[
+                        -3:
+                    ]:  # Show last few entries for debugging
+                        if (
+                            "error" in log_entry.lower()
+                            or "raw response" in log_entry.lower()
+                        ):
+                            print(f"{SUBTLE_COLOR}Router Debug: {log_entry}{RESET}")
+                else:
+                    for log_entry in self.router.debug_log:
+                        print(f"{SUBTLE_COLOR}Router: {log_entry}{RESET}")
+                    # Add routing time metric
+                    print(
+                        f"{SUBTLE_COLOR}Router: Total routing time: {routing_time:.2f}s{RESET}"
+                    )
+                self.router.debug_log = []  # Clear the debug log
+
+            # If the router suggests delegation with sufficient confidence
+            if (
+                routing_decision.get("delegate", False)
+                and routing_decision.get("confidence", 0) > 0.7
+            ):
+                agent_name = routing_decision.get("agent")
+                explanation = routing_decision.get("explanation", "")
+
+                # Print delegation message
+                print(
+                    f"{SUBTLE_COLOR}[{timestamp}] Auto-delegating to {agent_name}: {explanation}{RESET}"
+                )
+
+                # Delegate to the agent
+                response = self.delegate_to_agent(agent_name, user_input)
+
+                # Add to conversation history
+                self.conversation_history.append(
+                    {"role": "user", "content": user_input, "timestamp": timestamp}
+                )
+                self.conversation_history.append(
+                    {
+                        "role": "assistant",
+                        "content": response,
+                        "timestamp": OutputManager.format_timestamp(),
+                    }
+                )
+
+                return True, response
+
+            return False, None
+        finally:
+            # End the request
+            self.request_in_progress = False
 
     def generate_response(self, user_input):
         """
@@ -167,6 +283,73 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
         Returns:
             str: The EA's response
         """
+        # Check for auto-delegation toggle command
+        if user_input.lower() in ["/auto on", "/auto enable"]:
+            self.auto_delegation_enabled = True
+            self.router.enabled = True
+            response = "Automatic agent delegation has been enabled."
+            OutputManager.print_ea_response_prefix()
+            print(response)
+            OutputManager.print_divider()
+            return response
+
+        elif user_input.lower() in ["/auto off", "/auto disable"]:
+            self.auto_delegation_enabled = False
+            self.router.enabled = False
+            response = "Automatic agent delegation has been disabled. You can still use /ask commands."
+            OutputManager.print_ea_response_prefix()
+            print(response)
+            OutputManager.print_divider()
+            return response
+
+        # Router mode commands
+        elif user_input.lower() in ["/router verbose", "/router debug"]:
+            self.router.verbose = True
+            response = "Router verbose mode enabled. System prompts will include detailed instructions."
+            OutputManager.print_ea_response_prefix()
+            print(response)
+            OutputManager.print_divider()
+            return response
+
+        elif user_input.lower() in ["/router simple", "/router fast"]:
+            self.router.verbose = False
+            self.router.speed_mode = "fast"
+            response = "Router fast mode enabled. Using balanced speed and accuracy for routing."
+            OutputManager.print_ea_response_prefix()
+            print(response)
+            OutputManager.print_divider()
+            return response
+
+        elif user_input.lower() in ["/router fastest", "/router keyword"]:
+            self.router.verbose = False
+            self.router.speed_mode = "fastest"
+            response = "Router fastest mode enabled. Using keyword matching for instantaneous routing when possible."
+            OutputManager.print_ea_response_prefix()
+            print(response)
+            OutputManager.print_divider()
+            return response
+
+        elif user_input.lower() in ["/router accurate", "/router precise"]:
+            self.router.verbose = True
+            self.router.speed_mode = "accurate"
+            response = "Router accurate mode enabled. Using more thorough analysis for better routing decisions."
+            OutputManager.print_ea_response_prefix()
+            print(response)
+            OutputManager.print_divider()
+            return response
+
+        elif user_input.lower() == "/router":
+            # Display router configuration
+            router_status = "enabled" if self.router.enabled else "disabled"
+            verbose_status = "verbose" if self.router.verbose else "concise"
+            speed_mode = self.router.speed_mode
+            model_info = f"using {ROUTER_MODEL}"
+            response = f"Router status: {router_status}, verbosity: {verbose_status}, mode: {speed_mode}, {model_info}."
+            OutputManager.print_ea_response_prefix()
+            print(response)
+            OutputManager.print_divider()
+            return response
+
         # Check for agent delegation commands
         if user_input.startswith("/ask "):
             # Format: /ask agent_name query
@@ -212,8 +395,17 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
 
                 return response
 
-        # Add user input to conversation history with timestamp
+        # Get timestamp for this interaction
         timestamp = OutputManager.format_timestamp()
+
+        # Try automatic delegation first (unless this is a system command)
+        if not user_input.startswith("/"):
+            delegated, response = self.handle_auto_delegation(user_input, timestamp)
+            if delegated:
+                return response
+
+        # If we get here, either auto-delegation was not triggered or this is a system command
+        # Add user input to conversation history with timestamp
         self.conversation_history.append(
             {"role": "user", "content": user_input, "timestamp": timestamp}
         )
@@ -242,6 +434,9 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
         # Display timestamp and thinking animation
         print(f"{SUBTLE_COLOR}[{timestamp}]{RESET}")
         OutputManager.display_thinking_animation()
+
+        # Mark request as in progress
+        self.request_in_progress = True
 
         try:
             # Call the LLM API with streaming to show output as it's generated
@@ -288,3 +483,6 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
             OutputManager.print_error(error_msg)
             OutputManager.print_divider()
             return error_msg
+        finally:
+            # End the request
+            self.request_in_progress = False

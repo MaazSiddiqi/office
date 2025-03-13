@@ -50,7 +50,7 @@ class OutputManager:
 
     @staticmethod
     def print_system_message(message):
-        """Print a system message with appropriate styling."""
+        """Print a system message with system color."""
         print(f"{SYSTEM_COLOR}{message}{RESET}")
 
     @staticmethod
@@ -259,6 +259,9 @@ class OutputManager:
         OutputManager.print_system_message(f"{BULLET} Basic conversation with the EA")
         OutputManager.print_system_message(f"{BULLET} Conversation history tracking")
         OutputManager.print_system_message(f"{BULLET} Interact with specialized agents")
+        OutputManager.print_system_message(
+            f"{BULLET} Fast query routing to specialized agents"
+        )
 
         # Future capabilities (not yet implemented)
         print()
@@ -278,6 +281,18 @@ class OutputManager:
         )
         OutputManager.print_system_message(
             f"{BULLET} /status {ARROW} Show detailed agent status"
+        )
+        OutputManager.print_system_message(
+            f"{BULLET} /auto on|off {ARROW} Enable/disable automatic agent delegation"
+        )
+        OutputManager.print_system_message(
+            f"{BULLET} /router {ARROW} Show router status and configuration"
+        )
+        OutputManager.print_system_message(
+            f"{BULLET} /router verbose|fast {ARROW} Set router verbosity mode"
+        )
+        OutputManager.print_system_message(
+            f"{BULLET} /router fastest|fast|accurate {ARROW} Set router speed/accuracy mode"
         )
         OutputManager.print_system_message(
             f"{BULLET} exit, quit, /exit {ARROW} End the session"
