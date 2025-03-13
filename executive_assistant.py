@@ -13,7 +13,8 @@ import requests
 import time
 import datetime
 import sys
-from output_manager import OutputManager, SUBTLE_COLOR, RESET
+from output_manager import OutputManager, SUBTLE_COLOR, RESET, EA_COLOR, ARROW
+from agent_registry import get_registry
 
 # Configuration
 MODEL_NAME = "llama3.1:latest"  # Using local LLM
@@ -29,6 +30,7 @@ class ExecutiveAssistant:
     def __init__(self):
         """Initialize the Executive Assistant."""
         self.conversation_history = []
+        self.registry = get_registry()
 
         # Define the EA system prompt with personality and role definition
         self.system_prompt = """You are an Executive Assistant (EA) in an AI Office environment, serving as the central coordinator of a team of specialized AI agents.
@@ -83,6 +85,78 @@ You are the primary point of contact for the user (the "CEO") and the orchestrat
 Always maintain a helpful, efficient, and professional demeanor. Your purpose is to make the user's experience as productive and pleasant as possible.
 """
 
+    def delegate_to_agent(self, agent_name, query):
+        """
+        Delegate a query to a specific agent.
+
+        Args:
+            agent_name (str): Name of the agent to query
+            query (str): The query to send to the agent
+
+        Returns:
+            str: The agent's response
+        """
+        # Check if the agent is available in registry
+        if agent_name not in self.registry.list_available_agents():
+            return f"Agent '{agent_name}' is not configured in the system."
+
+        # Check if the agent process is running
+        if agent_name not in self.registry.agent_processes:
+            return f"Agent '{agent_name}' is not currently running or available."
+
+        # Print the agent response prefix
+        timestamp = OutputManager.format_timestamp()
+        print(
+            f"{SUBTLE_COLOR}[{timestamp}] {EA_COLOR}Agent '{agent_name}' {ARROW} {RESET}",
+            end="",
+            flush=True,
+        )
+
+        # Track whether we've started printing the response
+        is_printing = False
+        last_chunk_newline = False
+
+        # Define a callback to handle streaming responses
+        def handle_response_chunk(message):
+            nonlocal is_printing, last_chunk_newline
+
+            if message["type"] == "status":
+                if message["status"] == "starting":
+                    # Status updates are printed in subtle style
+                    print(f"{SUBTLE_COLOR}{message['message']}{RESET}")
+
+            elif message["type"] == "response":
+                # Regular responses are printed normally
+                chunk = message.get("response", "")
+
+                if chunk:
+                    # Print the chunk
+                    is_printing = True
+                    print(chunk, end="", flush=True)
+                    last_chunk_newline = chunk.endswith("\n")
+
+                # If this is the final message, add a newline if needed
+                if (
+                    message.get("is_final", False)
+                    and is_printing
+                    and not last_chunk_newline
+                ):
+                    print()  # Add a newline at the end if needed
+
+        # Send the query to the agent and get streaming responses
+        response = self.registry.send_request_to_agent(
+            agent_name, query, handle_response_chunk
+        )
+
+        # Add a newline if we didn't get any output
+        if not is_printing:
+            print()
+
+        # Print a divider to separate responses
+        OutputManager.print_divider()
+
+        return response
+
     def generate_response(self, user_input):
         """
         Generate a response from the EA based on user input.
@@ -93,6 +167,51 @@ Always maintain a helpful, efficient, and professional demeanor. Your purpose is
         Returns:
             str: The EA's response
         """
+        # Check for agent delegation commands
+        if user_input.startswith("/ask "):
+            # Format: /ask agent_name query
+            parts = user_input.split(" ", 2)
+            if len(parts) >= 3:
+                agent_name = parts[1]
+                query = parts[2]
+
+                timestamp = OutputManager.format_timestamp()
+                print(
+                    f"{SUBTLE_COLOR}[{timestamp}] Delegating to {agent_name}...{RESET}"
+                )
+
+                # Get list of running agents for better error messages
+                available_agents = list(self.registry.agent_processes.keys())
+
+                # Process the query with error handling
+                if agent_name not in self.registry.list_available_agents():
+                    response = f"I'm sorry, but '{agent_name}' is not a configured agent. Available agents are: {', '.join(self.registry.list_available_agents())}"
+                    OutputManager.print_ea_response_prefix()
+                    print(response)
+                    OutputManager.print_divider()
+                elif agent_name not in available_agents:
+                    response = f"I'm sorry, but the '{agent_name}' agent is not currently running. Running agents are: {', '.join(available_agents)}"
+                    OutputManager.print_ea_response_prefix()
+                    print(response)
+                    OutputManager.print_divider()
+                else:
+                    # The delegate_to_agent method will handle printing the response
+                    response = self.delegate_to_agent(agent_name, query)
+
+                # Add the interaction to conversation history
+                self.conversation_history.append(
+                    {"role": "user", "content": user_input, "timestamp": timestamp}
+                )
+                self.conversation_history.append(
+                    {
+                        "role": "assistant",
+                        "content": response,
+                        "timestamp": OutputManager.format_timestamp(),
+                    }
+                )
+
+                return response
+
         # Add user input to conversation history with timestamp
         timestamp = OutputManager.format_timestamp()
         self.conversation_history.append(
