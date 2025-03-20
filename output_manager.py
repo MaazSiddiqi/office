@@ -86,11 +86,31 @@ class OutputManager:
     @staticmethod
     def print_response(chunk, end=None):
         """Print a response chunk from an agent or EA with appropriate styling."""
-        # If end is specified, use it, otherwise default to newline
-        if end is not None:
-            print(f"{EA_COLOR}{chunk}{RESET}", end=end, flush=True)
-        else:
-            print(f"{EA_COLOR}{chunk}{RESET}", flush=True)
+        try:
+            # If end is specified, use it, otherwise default to newline
+            if end is not None:
+                print(f"{EA_COLOR}{chunk}{RESET}", end=end, flush=True)
+                # Force flush again to ensure output is displayed immediately
+                sys.stdout.flush()
+            else:
+                print(f"{EA_COLOR}{chunk}{RESET}", flush=True)
+                sys.stdout.flush()
+        except Exception as e:
+            # If there's an error, try a more direct approach
+            sys.stdout.write(f"{EA_COLOR}{chunk}{RESET}")
+            if end is None:
+                sys.stdout.write("\n")
+            sys.stdout.flush()
+
+    @staticmethod
+    def debug_stream():
+        """Test if streaming output is working."""
+        print("Testing streaming output... ", end="", flush=True)
+        for char in "This text should appear character by character.":
+            sys.stdout.write(char)
+            sys.stdout.flush()
+            time.sleep(0.05)
+        print(" Done!")
 
     @staticmethod
     def format_timestamp():
@@ -249,7 +269,7 @@ class OutputManager:
 
     @staticmethod
     def print_agent_response_prefix(agent_name):
-        """Print an agent response prefix with timestamp."""
+        """Print the agent response prefix with timestamp."""
         timestamp = OutputManager.format_timestamp()
         print(
             f"{SUBTLE_COLOR}[{timestamp}] {EA_COLOR}EA ({agent_name}) {ARROW} {RESET}",
@@ -259,76 +279,92 @@ class OutputManager:
 
     @staticmethod
     def print_welcome(width=80):
-        """Print a nicely formatted welcome message."""
-        # Title banner
+        """Print the welcome message for the AI Office."""
         OutputManager.print_divider(width)
+        OutputManager.print_system_message("AI Office v2 - Executive Assistant")
+        OutputManager.print_divider(width)
+
+        # Multi-line welcome message with core information
+        welcome_message = """Welcome to your AI Office environment!
+Your Executive Assistant (EA) is ready to help you.
+
+Current Capabilities:
+* Basic conversation with the EA
+* Conversation history tracking
+* Collaborative specialist consultations - watch the EA & specialists work together in real-time
+* Intelligent query routing for specialist knowledge
+* 'Sticky' context (stay with a specialist topic until it changes)
+* Long-term memory system for user preferences and information
+
+Coming Soon:
+* Parallel task execution
+* Feedback and improvement loops
+
+Commands:
+* /ask <agent> <query> -> Request the EA to collaborate with a specific specialist
+* /reset or /ea -> Return to general EA conversation
+* /agents -> List available specialists
+* /status -> Show detailed system status
+* /auto on|off -> Enable/disable automatic specialist consultations
+* /router -> Show router status and configuration
+* /router verbose|fast -> Set verbosity mode
+* /router fastest|fast|accurate -> Set speed/accuracy mode
+* /memory -> View stored memory about you
+* /debug stream -> Test if streaming output is working properly
+* exit, quit, /exit -> End the session"""
+
+        print(welcome_message)
+        OutputManager.print_divider(width)
+
+    @staticmethod
+    def print_internal_consultation_start(agent_name):
+        """Print the start of an internal consultation between EA and an agent."""
+        OutputManager.print_divider(80)
         print(
-            f"{HIGHLIGHT_COLOR}AI Office v2{RESET}{SYSTEM_COLOR} - Executive Assistant"
+            f"{HIGHLIGHT_COLOR}┌─ COLLABORATIVE CONSULTATION WITH {agent_name.upper()} ───{RESET}"
         )
-        OutputManager.print_divider(width)
+        OutputManager.print_divider(80)
 
-        # App description
-        print()
-        OutputManager.print_system_message("Welcome to your AI Office environment!")
-        print("Your Executive Assistant (EA) is ready to help you.")
+    @staticmethod
+    def print_internal_consultation_end():
+        """Print the end of an internal consultation."""
+        OutputManager.print_divider(80)
+        print(f"{HIGHLIGHT_COLOR}└─ END OF COLLABORATIVE CONSULTATION ───{RESET}")
+        OutputManager.print_divider(80)
 
-        # Current capabilities
-        print()
-        OutputManager.print_highlight("Current Capabilities:")
-        OutputManager.print_system_message(f"{BULLET} Basic conversation with the EA")
-        OutputManager.print_system_message(f"{BULLET} Conversation history tracking")
-        OutputManager.print_system_message(f"{BULLET} Interact with specialized agents")
-        OutputManager.print_system_message(
-            f"{BULLET} Fast query routing to specialized agents"
-        )
-        OutputManager.print_system_message(
-            f"{BULLET} 'Sticky' agent delegation (stay with an agent until topic changes)"
-        )
-        OutputManager.print_system_message(
-            f"{BULLET} Long-term memory system for user preferences and information"
-        )
+    @staticmethod
+    def print_consultation_message(sender, message):
+        """Print a message in the internal consultation with proper formatting."""
+        # Clean up the message for display
+        clean_message = message.replace("[INTERNAL CONSULTATION]", "").strip()
 
-        # Future capabilities (not yet implemented)
-        print()
-        OutputManager.print_subtle("Coming Soon:")
-        OutputManager.print_subtle(f"{BULLET} Parallel task execution")
-        OutputManager.print_subtle(f"{BULLET} Feedback and improvement loops")
+        # Split into lines for better display
+        lines = clean_message.split("\n")
 
-        # Commands
-        print()
-        OutputManager.print_highlight("Commands:")
-        OutputManager.print_system_message(
-            f"{BULLET} /ask <agent> <query> {ARROW} Ask a specialized agent"
-        )
-        OutputManager.print_system_message(
-            f"{BULLET} /reset or /ea {ARROW} Return control to the Executive Assistant"
-        )
-        OutputManager.print_system_message(
-            f"{BULLET} /agents {ARROW} List available agents"
-        )
-        OutputManager.print_system_message(
-            f"{BULLET} /status {ARROW} Show detailed agent status"
-        )
-        OutputManager.print_system_message(
-            f"{BULLET} /auto on|off {ARROW} Enable/disable automatic agent delegation"
-        )
-        OutputManager.print_system_message(
-            f"{BULLET} /router {ARROW} Show router status and configuration"
-        )
-        OutputManager.print_system_message(
-            f"{BULLET} /router verbose|fast {ARROW} Set router verbosity mode"
-        )
-        OutputManager.print_system_message(
-            f"{BULLET} /router fastest|fast|accurate {ARROW} Set router speed/accuracy mode"
-        )
-        OutputManager.print_system_message(
-            f"{BULLET} /memory {ARROW} View stored memory about you"
-        )
-        OutputManager.print_system_message(
-            f"{BULLET} exit, quit, /exit {ARROW} End the session"
-        )
+        # Print the sender with a clear prefix
+        if sender == "EA":
+            print(f"\n{SUBTLE_COLOR}┌── EA:{RESET}")
+        else:
+            print(f"\n{HIGHLIGHT_COLOR}┌── {sender}:{RESET}")
 
-        # Divider
-        print()
-        OutputManager.print_divider(width)
-        print()
+        # Print each line of the message with proper indentation
+        for line in lines:
+            if sender == "EA":
+                print(f"{SUBTLE_COLOR}│ {line}{RESET}")
+            else:
+                print(f"{HIGHLIGHT_COLOR}│ {line}{RESET}")
+
+        # Add a closing line
+        if sender == "EA":
+            print(f"{SUBTLE_COLOR}└───────{RESET}")
+        else:
+            print(f"{HIGHLIGHT_COLOR}└───────{RESET}")
+
+    @staticmethod
+    def print_collaborative_summary(agent_name):
+        """Print that the EA is incorporating insights from the agent."""
+        OutputManager.print_divider(80)
+        print(
+            f"{SYSTEM_COLOR}* Incorporating insights from collaboration with {agent_name}...{RESET}"
+        )
+        OutputManager.print_divider(40)

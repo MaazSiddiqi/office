@@ -1,35 +1,19 @@
 {
-  "preferences": [
-    {
-      "content": "The user likes to play soccer",
-      "timestamp": "22:37:39",
-      "source": "conversation"
-    },
-    {
-      "content": "The user likes to play",
-      "timestamp": "22:45:16",
-      "source": "conversation"
-    }
-  ],
+  "preferences": [],
   "characteristics": [
     {
       "content": "The user's name is maaz",
-      "timestamp": "22:37:05",
+      "timestamp": "00:56:13",
       "source": "conversation"
     },
     {
-      "content": "The user is your Executive Assistant here in this AI Office environment",
-      "timestamp": "23:11:27",
+      "content": "The user is doing",
+      "timestamp": "01:00:41",
       "source": "conversation"
     },
     {
-      "content": "The user is your Executive Assistant",
-      "timestamp": "23:17:39",
-      "source": "conversation"
-    },
-    {
-      "content": "The user is glad we had a chance to discuss the potential capabilities of our office",
-      "timestamp": "23:19:28",
+      "content": "The user is here to assist you as an Executive Assistant",
+      "timestamp": "15:18:43",
       "source": "conversation"
     }
   ],

@@ -55,6 +55,7 @@ class MemoryProcess(Process):
         self.memory_file = memory_file
         self.input_queue = input_queue
         self.memories = {}  # Initialize empty, will load in run()
+        self.recent_observations = []  # Store recent observations for context
 
     def _load_memories_from_file(self) -> Dict:
         """Load memories from disk."""
@@ -98,6 +99,9 @@ class MemoryProcess(Process):
         # Skip extraction for empty or command messages
         if not content or content.startswith("/"):
             return {}
+
+        # Store the observation for recent history
+        self._store_observation(observation)
 
         # Very simple keyword-based extraction
         extracted_info = {category: [] for category in MEMORY_CATEGORIES}
@@ -372,10 +376,26 @@ class MemoryProcess(Process):
         # Only return categories with actual content
         return {k: v for k, v in extracted_info.items() if v}
 
+    def _store_observation(self, observation: Dict):
+        """Store an observation in the recent observations list."""
+        # Only store if it has content
+        if "content" in observation and observation["content"]:
+            # Add timestamp if not present
+            if "timestamp" not in observation:
+                observation["timestamp"] = datetime.datetime.now().isoformat()
+
+            # Add to beginning of list (most recent first)
+            self.recent_observations.insert(0, observation)
+
+            # Trim list to keep only the 50 most recent observations
+            if len(self.recent_observations) > 50:
+                self.recent_observations = self.recent_observations[:50]
+
     def run(self):
         """Main process loop."""
         # Initialize memories in the run method to avoid pickling issues
         self.memories = self._load_memories_from_file()
+        self.recent_observations = []  # Initialize empty recent observations list
         OutputManager.print_info("Memory process started")
 
         while True:
@@ -422,6 +442,14 @@ class MemoryProcess(Process):
 
                         # Save after significant updates
                         self._save_memories_to_file()
+
+                elif message["type"] == "get_recent":
+                    # Return recent observations limited by the requested count
+                    limit = message.get("limit", 5)
+                    recent = self.recent_observations[:limit]
+
+                    # Convert to JSON string to avoid pickling issues
+                    message["response_pipe"].send(json.dumps(recent))
 
                 elif message["type"] == "get_memories":
                     # Return all memories or specific category
@@ -665,6 +693,36 @@ class MemoryManager:
                 prompt_parts.append(f"- {item}")
 
         return "\n".join(prompt_parts)
+
+    def get_recent_observations(self, limit: int = 5) -> List[Dict]:
+        """
+        Get the most recent observations, up to the specified limit.
+
+        Args:
+            limit (int): Maximum number of observations to return
+
+        Returns:
+            List[Dict]: List of recent observations
+        """
+        if not self.memory_process or not self.memory_process.is_alive():
+            return []
+
+        try:
+            # Request recent observations using pipe instead of queue
+            self.input_queue.put(
+                {"type": "get_recent", "limit": limit, "response_pipe": self.child_pipe}
+            )
+
+            # Wait for response (with timeout)
+            if self.parent_pipe.poll(3.0):
+                results_json = self.parent_pipe.recv()
+                return json.loads(results_json)
+            else:
+                OutputManager.print_error("Timeout getting recent observations")
+                return []
+        except Exception as e:
+            OutputManager.print_error(f"Error getting recent observations: {e}")
+            return []
 
     def shutdown(self):
         """Shut down the memory process."""
