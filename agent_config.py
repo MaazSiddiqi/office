@@ -3,6 +3,16 @@
 from dataclasses import dataclass
 
 
+class AgentStatus:
+    """Status of an agent."""
+
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    BUSY = "busy"
+    IDLE = "idle"
+    ERROR = "error"
+
+
 @dataclass
 class AgentConfig:
     """Configuration for an agent."""
@@ -13,4 +23,4 @@ class AgentConfig:
     system_prompt: str
     model: str
     temperature: float
-    status: str
+    status: AgentStatus
