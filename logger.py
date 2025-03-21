@@ -36,3 +36,8 @@ class Logger:
     def print_success(message: str):
         """Print a success message."""
         print(f"{Fore.GREEN}[SUCCESS]{Style.RESET_ALL} {message}")
+
+    @staticmethod
+    def print_system(caller: str, message: str):
+        """Print a system message."""
+        print(f"{Fore.LIGHTBLUE_EX}[{caller}] {message}{Style.RESET_ALL}")
