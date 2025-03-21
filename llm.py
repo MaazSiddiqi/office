@@ -1,4 +1,6 @@
 import requests
+from typing import Generator
+import json
 
 API_URL = "http://localhost:11434/api/generate"
 
@@ -9,7 +11,7 @@ class LLM:
         self.max_tokens = max_tokens
         self.temperature = temperature
 
-    def generate_response(self, prompt: str) -> str:
+    def generate_response_stream(self, prompt: str) -> Generator[str, None, None]:
         """
         Generate a response using the Ollama API.
 
@@ -17,33 +19,30 @@ class LLM:
             prompt (str): The input prompt to generate a response for
 
         Returns:
-            str: The generated response
+            Generator[str, None, None]: A generator of response chunks
         """
         payload = {
             "model": self.model,
             "prompt": prompt,
-            "stream": False,
-            "options": {"temperature": self.temperature, "max_tokens": self.max_tokens},
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
         }
 
         try:
-            response = requests.post(API_URL, json=payload)
+            response = requests.post(API_URL, json=payload, stream=True)
             response.raise_for_status()
 
-            result = ""
-            for line in response.text.splitlines():
+            for line in response.iter_lines():
                 if not line:
                     continue
 
-                data = response.json()
-                if "response" in data:
-                    result += data["response"]
-
-                if data.get("done", False):
-                    break
-
-            return result
+                try:
+                    data = json.loads(line)
+                    if "response" in data:
+                        yield data["response"]
+                except json.JSONDecodeError:
+                    continue
 
         except Exception as e:
             print(f"Error generating response: {e}")
-            return ""
+            yield ""

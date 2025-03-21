@@ -1,6 +1,7 @@
 import pytest
 import requests
 from llm import LLM
+from typing import Generator
 
 
 @pytest.fixture
@@ -22,9 +23,20 @@ def check_ollama():
         pytest.fail(f"Failed to connect to Ollama: {str(e)}")
 
 
-def test_ollama_responds_to_prompt(llm):
-    """Test that Ollama responds to a prompt."""
-    result = llm.generate_response("What is the capital of France?")
-    assert result is not None
-    assert isinstance(result, str)
-    assert len(result) > 0
+def test_ollama_stream_response(llm):
+    """Test that Ollama streams a response to a prompt."""
+    prompt = "What is the capital of France? Answer in one word."
+    response = llm.generate_response_stream(prompt)
+
+    # Validate the complete response
+    assert response is not None
+    assert isinstance(response, Generator)
+
+    # Collect the full response from the stream
+    full_response = ""
+    for chunk in response:
+        assert isinstance(chunk, str)
+        full_response += chunk
+
+    assert full_response is not None
+    assert len(full_response) > 0
