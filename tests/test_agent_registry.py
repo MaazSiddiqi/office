@@ -45,6 +45,7 @@ def test_registry_dir(tmp_path):
 def test_agent_registry_initialization(test_registry_dir):
     """Test that AgentRegistry initializes correctly with a registry directory."""
     registry = AgentRegistry(str(test_registry_dir))
+    registry.load()  # Explicitly load agents
     assert len(registry.agents) == 2
     assert "test_agent1" in registry.agents
     assert "test_agent2" in registry.agents
@@ -53,6 +54,7 @@ def test_agent_registry_initialization(test_registry_dir):
 def test_get_agent(test_registry_dir):
     """Test retrieving an agent by name."""
     registry = AgentRegistry(str(test_registry_dir))
+    registry.load()  # Explicitly load agents
     agent = registry.get_agent("test_agent1")
     assert agent is not None
     assert agent.name == "test_agent1"
@@ -63,6 +65,7 @@ def test_get_agent(test_registry_dir):
 def test_get_nonexistent_agent(test_registry_dir):
     """Test retrieving a nonexistent agent returns None."""
     registry = AgentRegistry(str(test_registry_dir))
+    registry.load()  # Explicitly load agents
     agent = registry.get_agent("nonexistent_agent")
     assert agent is None
 
@@ -70,6 +73,7 @@ def test_get_nonexistent_agent(test_registry_dir):
 def test_list_agents(test_registry_dir):
     """Test listing all agents."""
     registry = AgentRegistry(str(test_registry_dir))
+    registry.load()  # Explicitly load agents
     agents = registry.list_agents()
     assert len(agents) == 2
     assert all(isinstance(agent, AgentConfig) for agent in agents.values())
@@ -81,6 +85,7 @@ def test_list_agents(test_registry_dir):
 def test_empty_registry(tmp_path):
     """Test AgentRegistry with an empty registry directory."""
     registry = AgentRegistry(str(tmp_path))
+    registry.load()  # Explicitly load agents
     assert len(registry.agents) == 0
     assert registry.get_agent("any_agent") is None
     assert len(registry.list_agents()) == 0

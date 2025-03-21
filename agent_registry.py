@@ -13,6 +13,8 @@ class AgentRegistry:
     def __init__(self, registry_dir: str = "registry"):
         self.registry_dir = registry_dir
         self.agents: Dict[str, AgentConfig] = {}
+
+    def load(self):
         self._load_agents()
 
     def get_agent(self, agent_name: str) -> AgentConfig:
