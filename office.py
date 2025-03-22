@@ -1,7 +1,7 @@
 import sys
 from agent_registry import AgentRegistry
 from logger import Logger
-from llm import LLM
+from ea import ExecutiveAssistant
 
 EXIT_PHRASES = ["exit", "quit", "bye"]
 COMMANDS = {
@@ -10,15 +10,29 @@ COMMANDS = {
 }
 
 
+EA_PROMPT_PATH = "prompts/ea.prompt.txt"
+
+
 class Office:
-    def __init__(self):
+    def __init__(
+        self,
+    ):
         self.agent_registry = AgentRegistry()
-        self.llm = LLM(model="llama3.1:latest", max_tokens=2048, temperature=0.7)
+
+        self.ea = ExecutiveAssistant(
+            EA_PROMPT_PATH, {"agent_registry": self.agent_registry}
+        )
 
     def load(self):
+        """
+        Load the agent registry
+        """
         self.agent_registry.load()
 
     def run(self):
+        """
+        Run the AI Office
+        """
         Logger.print_welcome()
 
         while True:
@@ -29,6 +43,12 @@ class Office:
         self.stop()
 
     def handle_user_input(self):
+        """
+        Handle user input
+
+        Returns:
+            bool: True if the main loop should continue, False if it should break
+        """
         user_input = input(f"{Logger.format_timestamp()} > ").strip()
 
         if user_input.lower() in EXIT_PHRASES:
@@ -44,9 +64,22 @@ class Office:
         return True
 
     def is_command(self, user_input: str) -> bool:
+        """
+        Check if the user input is a command
+
+        Returns:
+            bool: True if the input is a command, False otherwise
+        """
         return user_input.startswith("/")
 
     def handle_command(self, command: str, args: list[str]):
+        """
+        Handle a command
+
+        Args:
+            command (str): The command to handle
+            args (list[str]): The arguments to the command
+        """
         match command:
             case "help":
                 Logger.print_system_message(COMMANDS[command])
@@ -56,12 +89,21 @@ class Office:
                 Logger.print_error(f"Unknown command: {command}")
 
     def handle_user_query(self, user_input: str):
-        response = self.llm.generate_response_stream(user_input)
+        """
+        Handle a user query
+
+        Args:
+            user_input (str): The user query to handle
+        """
+        response = self.ea.ask(user_input)
 
         for chunk in response:
             Logger.print_llm_stream(chunk)
         Logger.print_llm_stream("\n")
 
     def stop(self):
+        """
+        Stop the AI Office
+        """
         Logger.print_warning("Shutting down AI Office...")
         sys.exit(0)
