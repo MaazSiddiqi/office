@@ -66,6 +66,11 @@ class Logger:
         print(f"{SYSTEM_COLOR}{message}{RESET}")
 
     @staticmethod
+    def print_llm_stream(message: str):
+        """Print a stream message with system color."""
+        print(f"{SYSTEM_COLOR}{message}{RESET}", end="", flush=True)
+
+    @staticmethod
     def print_info(message: str):
         """Print an informational message."""
         print(f"{SYSTEM_COLOR}{BULLET} {message}{RESET}")
