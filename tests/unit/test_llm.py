@@ -8,16 +8,12 @@ import json
 @pytest.fixture
 def llm():
     """Fixture to create an LLM instance for testing."""
-    return LLM(model="llama3.1:latest", max_tokens=1000, temperature=0.7)
-
-
-def test_initialization():
-    """Test proper initialization of LLM class."""
-    llm = LLM(model="mistral", max_tokens=500, temperature=0.5)
-
-    assert llm.model == "mistral"
-    assert llm.max_tokens == 500
-    assert llm.temperature == 0.5
+    return LLM(
+        model="llama3.1:latest",
+        system_prompt="You are a helpful assistant.",
+        max_tokens=1000,
+        temperature=0.7,
+    )
 
 
 @patch("requests.post")

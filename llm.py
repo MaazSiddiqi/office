@@ -6,11 +6,17 @@ API_URL = "http://localhost:11434/api/generate"
 
 
 class LLM:
-    def __init__(self, model: str, max_tokens: int, temperature: float):
+    def __init__(
+        self,
+        model: str,
+        system_prompt: str = "",
+        max_tokens: int = 2048,
+        temperature: float = 0.7,
+    ):
         self.model = model
         self.max_tokens = max_tokens
         self.temperature = temperature
-        self.conversation_history = []
+        self.conversation_history = [{"role": "system", "content": system_prompt}]
 
     def generate_response_stream(self, prompt: str) -> Generator[str, None, None]:
         """
