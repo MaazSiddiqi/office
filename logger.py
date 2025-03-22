@@ -119,55 +119,53 @@ class Logger:
         print()
         Logger.print_highlight("Current Capabilities:")
         Logger.print_system_message(f"{BULLET} Basic conversation with the EA")
-        Logger.print_system_message(f"{BULLET} Conversation history tracking")
-        Logger.print_system_message(f"{BULLET} Interact with specialized agents")
-        Logger.print_system_message(
-            f"{BULLET} Fast query routing to specialized agents"
-        )
-        Logger.print_system_message(
-            f"{BULLET} 'Sticky' agent delegation (stay with an agent until topic changes)"
-        )
-        Logger.print_system_message(
-            f"{BULLET} Long-term memory system for user preferences and information"
-        )
 
         # Future capabilities (not yet implemented)
         print()
         Logger.print_subtle("Coming Soon:")
         Logger.print_subtle(f"{BULLET} Parallel task execution")
         Logger.print_subtle(f"{BULLET} Feedback and improvement loops")
+        Logger.print_subtle(f"{BULLET} Conversation history tracking")
+        Logger.print_subtle(f"{BULLET} Interact with specialized agents")
+        Logger.print_subtle(f"{BULLET} Fast query routing to specialized agents")
+        Logger.print_subtle(
+            f"{BULLET} 'Sticky' agent delegation (stay with an agent until topic changes)"
+        )
+        Logger.print_subtle(
+            f"{BULLET} Long-term memory system for user preferences and information"
+        )
 
         # Commands
         print()
         Logger.print_highlight("Commands:")
         Logger.print_system_message(
-            f"{BULLET} /ask <agent> <query> {ARROW} Ask a specialized agent"
-        )
-        Logger.print_system_message(
-            f"{BULLET} /reset or /ea {ARROW} Return control to the Executive Assistant"
-        )
-        Logger.print_system_message(f"{BULLET} /agents {ARROW} List available agents")
-        Logger.print_system_message(
-            f"{BULLET} /status {ARROW} Show detailed agent status"
-        )
-        Logger.print_system_message(
-            f"{BULLET} /auto on|off {ARROW} Enable/disable automatic agent delegation"
-        )
-        Logger.print_system_message(
-            f"{BULLET} /router {ARROW} Show router status and configuration"
-        )
-        Logger.print_system_message(
-            f"{BULLET} /router verbose|fast {ARROW} Set router verbosity mode"
-        )
-        Logger.print_system_message(
-            f"{BULLET} /router fastest|fast|accurate {ARROW} Set router speed/accuracy mode"
-        )
-        Logger.print_system_message(
-            f"{BULLET} /memory {ARROW} View stored memory about you"
-        )
-        Logger.print_system_message(
             f"{BULLET} exit, quit, /exit {ARROW} End the session"
         )
+        # Logger.print_system_message(
+        #     f"{BULLET} /ask <agent> <query> {ARROW} Ask a specialized agent"
+        # )
+        # Logger.print_system_message(
+        #     f"{BULLET} /reset or /ea {ARROW} Return control to the Executive Assistant"
+        # )
+        # Logger.print_system_message(f"{BULLET} /agents {ARROW} List available agents")
+        # Logger.print_system_message(
+        #     f"{BULLET} /status {ARROW} Show detailed agent status"
+        # )
+        # Logger.print_system_message(
+        #     f"{BULLET} /auto on|off {ARROW} Enable/disable automatic agent delegation"
+        # )
+        # Logger.print_system_message(
+        #     f"{BULLET} /router {ARROW} Show router status and configuration"
+        # )
+        # Logger.print_system_message(
+        #     f"{BULLET} /router verbose|fast {ARROW} Set router verbosity mode"
+        # )
+        # Logger.print_system_message(
+        #     f"{BULLET} /router fastest|fast|accurate {ARROW} Set router speed/accuracy mode"
+        # )
+        # Logger.print_system_message(
+        #     f"{BULLET} /memory {ARROW} View stored memory about you"
+        # )
 
         # Divider
         print()
