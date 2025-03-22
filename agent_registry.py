@@ -15,7 +15,7 @@ class AgentRegistry:
         self.agents: Dict[str, AgentConfig] = {}
 
     def load(self):
-        self._load_agents()
+        self._load_all_configs()
 
     def get_agent(self, agent_name: str) -> AgentConfig:
         return self.agents.get(agent_name)
@@ -28,7 +28,7 @@ class AgentRegistry:
         with open(config_path, "r") as f:
             return AgentConfig(**json.load(f))
 
-    def _load_agents(self):
+    def _load_all_configs(self):
         self.log("Loading all agents from registry")
         for filename in os.listdir(self.registry_dir):
             if not filename.endswith(".json"):

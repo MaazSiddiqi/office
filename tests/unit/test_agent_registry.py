@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import os
 import json
 import pytest
 from agent_registry import AgentRegistry
@@ -54,7 +53,7 @@ def test_agent_registry_initialization(test_registry_dir):
 def test_get_agent(test_registry_dir):
     """Test retrieving an agent by name."""
     registry = AgentRegistry(str(test_registry_dir))
-    registry.load()  # Explicitly load agents
+    registry.load()
     agent = registry.get_agent("test_agent1")
     assert agent is not None
     assert agent.name == "test_agent1"
