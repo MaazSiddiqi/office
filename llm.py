@@ -13,7 +13,7 @@ class LLM:
 
     def generate_response_stream(self, prompt: str) -> Generator[str, None, None]:
         """
-        Generate a response using the Ollama API.
+        Generate a streaming response using the Ollama API.
 
         Args:
             prompt (str): The input prompt to generate a response for
@@ -26,23 +26,20 @@ class LLM:
             "prompt": prompt,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
+            "stream": True,  # Ensure streaming is explicitly enabled
         }
 
-        try:
-            response = requests.post(API_URL, json=payload, stream=True)
-            response.raise_for_status()
+        # Let exceptions propagate to the caller
+        response = requests.post(API_URL, json=payload, stream=True)
+        response.raise_for_status()
 
-            for line in response.iter_lines():
-                if not line:
-                    continue
+        for line in response.iter_lines():
+            if not line:
+                continue
 
-                try:
-                    data = json.loads(line)
-                    if "response" in data:
-                        yield data["response"]
-                except json.JSONDecodeError:
-                    continue
-
-        except Exception as e:
-            print(f"Error generating response: {e}")
-            yield ""
+            try:
+                data = json.loads(line)
+                if "response" in data:
+                    yield data["response"]
+            except json.JSONDecodeError:
+                continue
