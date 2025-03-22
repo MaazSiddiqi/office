@@ -5,6 +5,7 @@ import json
 from typing import Dict
 from logger import Logger
 from agent_config import AgentConfig
+from agent import Agent
 
 
 class AgentRegistry:
@@ -19,6 +20,9 @@ class AgentRegistry:
 
     def get_agent(self, agent_name: str) -> AgentConfig:
         return self.agents.get(agent_name)
+
+    def spawn_agent(self, agent_name: str) -> Agent:
+        return Agent(self.get_agent(agent_name))
 
     def list_agents(self) -> Dict[str, AgentConfig]:
         return self.agents
@@ -36,6 +40,18 @@ class AgentRegistry:
             config = self._load_config(os.path.join(self.registry_dir, filename))
             self.agents[config.name] = config
         self.log(f"Loaded {len(self.agents)} agents")
+
+    def __str__(self) -> str:
+        return (
+            "\n".join(
+                [
+                    f"{name} - Name: {agent.display_name}, Description: {agent.description}"
+                    for name, agent in self.agents.items()
+                ]
+            )
+            if self.agents
+            else "No agents available"
+        )
 
     def log(self, message: str):
         Logger.print_system("AgentRegistry", message)
