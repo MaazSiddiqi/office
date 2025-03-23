@@ -1,6 +1,7 @@
 import requests
 from typing import Generator
 import json
+from logger import Logger
 
 API_URL = "http://localhost:11434/api/generate"
 
@@ -50,20 +51,57 @@ class LLM:
         response.raise_for_status()
 
         full_response = ""
+
+        buffer = ""
+        in_op = False
+        op_buffer = ""
+
         for line in response.iter_lines():
             if not line:
                 continue
 
             try:
                 data = json.loads(line)
-                if "response" in data:
-                    chunk = data["response"]
-                    full_response += chunk
-                    yield chunk
+                chunk = data["response"] if "response" in data else ""
+
+                for char in chunk:
+                    if not in_op and "[CONNECT]" in buffer:
+                        print(f"\n\n[CONNECT_STATUS] Connection request initiated.")
+                        in_op = True
+                        op_buffer = ""
+
+                    if in_op:
+                        if char == "\n":
+                            print(
+                                f"[CONNECT_STATUS] Successfully connected to agent {op_buffer.strip()}"
+                            )
+
+                            full_response += f"Hello! How may I help you today?"
+
+                            for response in self.generate_response_stream(
+                                full_prompt + full_response
+                            ):
+                                full_response += response
+                                yield response
+                            break
+                        op_buffer += char
+                    else:
+                        buffer += char
+                        if char == " ":
+                            full_response += buffer
+                            yield buffer
+                            buffer = ""
+
             except json.JSONDecodeError:
                 continue
+
+        if not in_op:
+            yield buffer
 
         # After generating the complete response, add it to conversation history
         self.conversation_history.append(
             {"role": "assistant", "content": full_response}
         )
+
+    def log(self, message: str):
+        Logger.print_system("LLM", message)
