@@ -20,7 +20,10 @@ class Office:
         self.agent_registry = AgentRegistry()
 
         self.ea = ExecutiveAssistant(
-            EA_PROMPT_PATH, {"agent_registry": self.agent_registry}
+            EA_PROMPT_PATH,
+            {
+                "agent_registry": str(self.agent_registry),
+            },
         )
 
     def load(self):
