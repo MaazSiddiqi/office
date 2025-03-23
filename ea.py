@@ -1,7 +1,7 @@
 from agent import Agent
 from agent_config import AgentConfig, AgentStatus
 
-EA_MODEL = "deepseek-r1:8b"
+EA_MODEL = "gemma3:latest"
 
 
 class ExecutiveAssistant(Agent):
