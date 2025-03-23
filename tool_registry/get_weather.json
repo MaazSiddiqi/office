@@ -4,11 +4,13 @@
   "parameters": {
     "location": {
       "type": "string",
-      "description": "The location to get the weather for"
+      "description": "The location to get the weather for",
+      "required": true
     },
     "date": {
       "type": "string",
-      "description": "The date to get the weather for"
+      "description": "The date to get the weather for",
+      "required": true
     }
   },
   "returns": {
