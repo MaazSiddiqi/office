@@ -1,5 +1,6 @@
 import sys
 from agent_registry import AgentRegistry
+from tool_registry import ToolRegistry
 from logger import Logger
 from ea import ExecutiveAssistant
 
@@ -18,11 +19,12 @@ class Office:
         self,
     ):
         self.agent_registry = AgentRegistry()
-
+        self.tool_registry = ToolRegistry()
         self.ea = ExecutiveAssistant(
             EA_PROMPT_PATH,
             {
                 "agent_registry": str(self.agent_registry),
+                "tool_registry": str(self.tool_registry),
             },
         )
 

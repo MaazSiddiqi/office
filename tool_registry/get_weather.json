@@ -1,0 +1,18 @@
+{
+  "name": "get_weather",
+  "description": "Get the weather in a given location and date",
+  "parameters": {
+    "location": {
+      "type": "string",
+      "description": "The location to get the weather for"
+    },
+    "date": {
+      "type": "string",
+      "description": "The date to get the weather for"
+    }
+  },
+  "returns": {
+    "type": "string",
+    "description": "The weather in the given location and date"
+  }
+}
