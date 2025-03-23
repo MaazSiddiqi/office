@@ -4,6 +4,8 @@
 
 AI Office is a multi-agent AI system that simulates a professional office environment where specialized AI agents work collaboratively on tasks under the management of an Executive Assistant (EA). You, as the "CEO," interact exclusively with the EA, who orchestrates all agent activities on your behalf.
 
+![AI Office Demo](misc/demo.png)
+
 ## Installation
 
 ### Prerequisites
