@@ -11,7 +11,7 @@ from agent import Agent
 class AgentRegistry:
     """Manages the registration and spawning of AI agents."""
 
-    def __init__(self, registry_dir: str = "registry"):
+    def __init__(self, registry_dir: str = "agent_registry"):
         self.registry_dir = registry_dir
         self.agents: Dict[str, AgentConfig] = {}
 
