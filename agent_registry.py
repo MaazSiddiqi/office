@@ -2,9 +2,9 @@
 
 import os
 import json
-from typing import Dict
+from typing import Dict, List
 from logger import Logger
-from agent_config import AgentConfig
+from agent_config import AgentConfig, AgentStatus
 from agent import Agent
 
 
@@ -22,10 +22,23 @@ class AgentRegistry:
         return self.agents.get(agent_name)
 
     def spawn_agent(self, agent_name: str) -> Agent:
-        return Agent(self.get_agent(agent_name))
+        agent = Agent(self.get_agent(agent_name))
+        self.agents[agent_name].status = AgentStatus.ACTIVE
+
+        return agent
+
+    def spawn_all_agents(self) -> Dict[str, Agent]:
+        return {name: self.spawn_agent(name) for name in self.agents}
 
     def list_agents(self) -> Dict[str, AgentConfig]:
         return self.agents
+
+    def list_available_agents(self) -> List[AgentConfig]:
+        return [
+            agent
+            for agent in self.agents.values()
+            if agent.status == AgentStatus.ACTIVE
+        ]
 
     def _load_config(self, config_path: str) -> AgentConfig:
         self.log(f"Loading agent config from {config_path}")
@@ -47,6 +60,7 @@ class AgentRegistry:
                 [
                     f"{name} - Name: {agent.display_name}, Description: {agent.description}"
                     for name, agent in self.agents.items()
+                    if agent.status == AgentStatus.ACTIVE
                 ]
             )
             if self.agents
