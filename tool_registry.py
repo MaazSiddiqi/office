@@ -1,5 +1,6 @@
 import json
 import os
+from logger import Logger
 
 
 class Tool:
@@ -32,11 +33,18 @@ class ToolRegistry:
 
     def load_tool(self, tool_path: str):
         with open(tool_path, "r") as f:
-            self.tools.append(Tool(**json.load(f), raw_json=json.load(f)))
+            tool_json = json.load(f)
+            self.tools.append(
+                Tool(**tool_json, raw_json=json.dumps(tool_json, indent=2))
+            )
+
+        self.log(f"Loaded tool from {tool_path}")
 
     def load_all_tools(self):
         for filename in os.listdir(self.registry_dir):
             self.load_tool(os.path.join(self.registry_dir, filename))
+
+        self.log(f"Loaded {len(self.tools)} tools")
 
     def get_tool_names(self) -> list[str]:
         return [tool.name for tool in self.tools]
@@ -48,4 +56,11 @@ class ToolRegistry:
         return None
 
     def __str__(self) -> str:
-        return "\n".join([str(tool) for tool in self.tools])
+        return (
+            "\n".join([str(tool) for tool in self.tools])
+            if self.tools
+            else "No tools loaded"
+        )
+
+    def log(self, message: str):
+        Logger.print_system("ToolRegistry", message)
