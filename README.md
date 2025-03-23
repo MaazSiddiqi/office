@@ -1,4 +1,4 @@
-# AI Office v2
+# AI Office
 
 ## Overview
 
@@ -23,9 +23,10 @@ AI Office is a multi-agent AI system that simulates a professional office enviro
    ```bash
    pip install -r requirements.txt
    ```
-4. Make sure Ollama is running with the llama3.1 model:
+4. Make sure you have ollama and the llama3.1 model installed
    ```bash
-   ollama run llama3.1
+   ollama
+   ollama pull llama3.1
    ```
 
 ## Usage
@@ -38,11 +39,6 @@ python main.py
 
 ### Commands
 
-- `/task [description]` - Create a new task
-- `/status` - View all ongoing tasks
-- `/agents` - List available specialized agents
-- `/feedback [agent] [comments]` - Provide feedback on an agent's performance
-- `/help` - View available commands
 - `exit`, `quit`, `/exit` - End the session
 
 ## Key Features
