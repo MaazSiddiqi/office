@@ -15,16 +15,26 @@ EA_PROMPT_PATH = "prompts/ea.prompt.txt"
 
 
 class Office:
+    agent_registry = None
+    tool_registry = None
+
     def __init__(
         self,
     ):
-        self.agent_registry = AgentRegistry()
-        self.tool_registry = ToolRegistry()
+        if Office.agent_registry is None:
+            Office.agent_registry = AgentRegistry()
+            Office.agent_registry.load()
+            Office.agent_registry.spawn_all_agents()
+
+        if Office.tool_registry is None:
+            Office.tool_registry = ToolRegistry()
+            Office.tool_registry.load_all_tools()
+
         self.ea = ExecutiveAssistant(
             EA_PROMPT_PATH,
             {
-                "agent_registry": str(self.agent_registry),
-                "tool_registry": str(self.tool_registry),
+                "agent_registry": str(Office.agent_registry),
+                "tool_registry": str(Office.tool_registry),
             },
         )
 
@@ -32,7 +42,6 @@ class Office:
         """
         Load the agent registry
         """
-        self.agent_registry.load()
 
     def run(self):
         """
